@@ -1,0 +1,225 @@
+// ═══════════════════════════════════════════════════════════════
+// Quanta — Prisma Schema
+// Multi-role RBAC · Account + BU scoping · Domain-whitelisted auth
+// ═══════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ──
+
+enum ProjectStatus {
+  active
+  on_hold
+  complete
+  archived
+}
+
+enum Role {
+  IC
+  PM
+  AC
+  BUL
+  AA
+}
+
+// ── User ──
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  name            String
+  passwordHash    String    @map("password_hash")
+  totpSecret      String?   @map("totp_secret")     // AES-encrypted TOTP secret
+  totpVerified    Boolean   @default(false) @map("totp_verified")
+  roles           Role[]    @default([IC])
+  projectRoles    String[]  @default([]) @map("project_roles")  // e.g. ["iOS Dev", "Backend"]
+  primaryBuId     String    @map("primary_bu_id")
+  primaryBu       BusinessUnit @relation(fields: [primaryBuId], references: [id])
+  financialAccess Boolean   @default(false) @map("financial_access") // for AA users
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  assignments      ResourceAssignment[]
+  managedAccounts  AccountManager[]
+  projectsCreated  Project[]        @relation("ProjectCreator")
+  auditLogs        AuditLog[]       @relation("AuditActor")
+  domainsAdded     DomainWhitelist[] @relation("DomainAdder")
+
+  @@index([primaryBuId])
+  @@map("users")
+}
+
+// ── Business Unit ──
+
+model BusinessUnit {
+  id        String   @id @default(uuid())
+  code      String   @unique                // e.g. "US-ORD-OWLS"
+  name      String                          // e.g. "Chicago Owls"
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  users          User[]
+  ownedProjects  Project[]       @relation("ProjectOwningBU")
+  sharedProjects ProjectShare[]
+
+  @@map("business_units")
+}
+
+// ── Account (Client) ──
+
+model Account {
+  id        String   @id @default(uuid())
+  name      String                          // e.g. "Meridian Corp"
+  code      String   @unique                // e.g. "MER"
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  projects  Project[]
+  managers  AccountManager[]
+
+  @@map("accounts")
+}
+
+// ── Account Manager (join: User <-> Account) ──
+
+model AccountManager {
+  id        String  @id @default(uuid())
+  accountId String  @map("account_id")
+  userId    String  @map("user_id")
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, userId])
+  @@index([userId])
+  @@map("account_managers")
+}
+
+// ── Domain Whitelist ──
+
+model DomainWhitelist {
+  id       String   @id @default(uuid())
+  domain   String   @unique                 // e.g. "trifork.com"
+  addedBy  String   @map("added_by")
+  addedAt  DateTime @default(now()) @map("added_at")
+  addedByUser User  @relation("DomainAdder", fields: [addedBy], references: [id])
+
+  @@map("domain_whitelist")
+}
+
+// ── Project ──
+
+model Project {
+  id             String        @id @default(uuid())
+  name           String
+  accountId      String        @map("account_id")
+  account        Account       @relation(fields: [accountId], references: [id])
+  owningBuId     String        @map("owning_bu_id")
+  owningBu       BusinessUnit  @relation("ProjectOwningBU", fields: [owningBuId], references: [id])
+  projectCode    String        @unique @map("project_code")
+  startDate      DateTime      @map("start_date") @db.Date
+  endDate        DateTime      @map("end_date") @db.Date
+  contingencyPct Decimal       @default(0.15) @map("contingency_pct") @db.Decimal(5, 4)
+  status         ProjectStatus @default(active)
+  description    String?
+  createdById    String        @map("created_by")
+  createdBy      User          @relation("ProjectCreator", fields: [createdById], references: [id])
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  assignments ResourceAssignment[]
+  shares      ProjectShare[]
+
+  @@index([accountId, owningBuId, status])
+  @@map("projects")
+}
+
+// ── Project Share (cross-BU visibility for BULs) ──
+
+model ProjectShare {
+  id              String       @id @default(uuid())
+  projectId       String       @map("project_id")
+  sharedWithBuId  String       @map("shared_with_bu_id")
+  project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sharedWithBu    BusinessUnit @relation(fields: [sharedWithBuId], references: [id])
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  @@unique([projectId, sharedWithBuId])
+  @@index([sharedWithBuId])
+  @@map("project_shares")
+}
+
+// ── Resource Assignment ──
+
+model ResourceAssignment {
+  id           String  @id @default(uuid())
+  projectId    String  @map("project_id")
+  project      Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId       String  @map("user_id")
+  user         User    @relation(fields: [userId], references: [id])
+  projectRole  String  @map("project_role")         // e.g. "iOS Dev", "PM"
+  billRate     Decimal @map("bill_rate") @db.Decimal(10, 2)
+  costRate     Decimal @map("cost_rate") @db.Decimal(10, 2)
+  businessUnit String  @map("business_unit")        // user's BU at assignment time
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  hourEntries HourEntry[]
+
+  @@unique([projectId, userId])
+  @@map("resource_assignments")
+}
+
+// ── Hour Entry ──
+
+model HourEntry {
+  id            String             @id @default(uuid())
+  assignmentId  String             @map("assignment_id")
+  assignment    ResourceAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  projectWeek   Int                @map("project_week")      // 0-based week index
+  weekStartDate DateTime           @map("week_start_date") @db.Date
+  plannedHours  Decimal?           @map("planned_hours") @db.Decimal(5, 2)
+  actualHours   Decimal?           @map("actual_hours") @db.Decimal(5, 2)
+  locked        Boolean            @default(false)
+
+  @@unique([assignmentId, projectWeek])
+  @@index([assignmentId, projectWeek])
+  @@map("hour_entries")
+}
+
+// ── Audit Log ──
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  entityType String   @map("entity_type")            // e.g. "User", "HourEntry", "Project"
+  entityId   String   @map("entity_id")
+  field      String                                   // e.g. "roles", "actual_hours", "cost_rate"
+  oldValue   String?  @map("old_value")
+  newValue   String?  @map("new_value")
+  changedBy  String   @map("changed_by")
+  changedByUser User  @relation("AuditActor", fields: [changedBy], references: [id])
+  changedAt  DateTime @default(now()) @map("changed_at")
+
+  @@index([entityType, entityId, changedAt])
+  @@map("audit_logs")
+}
+
+// ── Global Config ──
+
+model GlobalConfig {
+  key   String @id
+  value String
+
+  @@map("global_config")
+}

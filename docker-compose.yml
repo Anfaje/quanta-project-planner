@@ -1,0 +1,88 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL 16 ──
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quanta
+      POSTGRES_PASSWORD: quanta
+      POSTGRES_DB: quanta
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quanta"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Redis 7 ──
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Mailpit (local email testing) ──
+  mailpit:
+    image: axllent/mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+  # ── API (dev mode) ──
+  api:
+    build:
+      context: ./packages/api
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://quanta:quanta@postgres:5432/quanta?schema=public
+      REDIS_URL: redis://redis:6379
+      SESSION_SECRET: dev-session-secret-replace-in-production
+      TOTP_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: noreply@quanta.app
+      API_PORT: 4000
+      API_URL: http://localhost:4000
+      WEB_URL: http://localhost:5173
+      NODE_ENV: development
+    volumes:
+      - ./packages/api/src:/app/src
+      - ./packages/api/prisma:/app/prisma
+
+  # ── Migrate (run once) ──
+  migrate:
+    build:
+      context: ./packages/api
+      dockerfile: Dockerfile.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://quanta:quanta@postgres:5432/quanta?schema=public
+    command: npx prisma migrate deploy
+    restart: "no"
+
+volumes:
+  pgdata:

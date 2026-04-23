@@ -1,0 +1,23 @@
+{
+  "name": "quanta",
+  "private": true,
+  "workspaces": [
+    "packages/api",
+    "packages/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace=packages/api",
+    "dev:web": "npm run dev --workspace=packages/web",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspace=packages/api",
+    "db:migrate": "npm run db:migrate --workspace=packages/api",
+    "db:seed": "npm run db:seed --workspace=packages/api",
+    "db:reset": "npm run db:reset --workspace=packages/api"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "typescript": "^5.4.0"
+  }
+}
