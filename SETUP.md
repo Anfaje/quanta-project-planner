@@ -15,6 +15,8 @@ You need these installed:
 
 If you don't have Docker Desktop: https://www.docker.com/products/docker-desktop/
 
+**Important (macOS):** Make sure Docker Desktop is running before Step 3. Open it from Applications and wait for the whale icon in the menu bar to stop animating. You can verify with `docker info`.
+
 ---
 
 ## Step 1 — Clone the repo
