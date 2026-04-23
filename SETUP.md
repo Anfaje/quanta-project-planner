@@ -60,7 +60,10 @@ This installs both the API and web packages (mono-repo workspaces).
 
 ## Step 5 — Run database migrations
 
+Prisma needs the `.env` file in the `packages/api/` directory. Copy it from the root, then run migrations:
+
 ```bash
+cp .env packages/api/.env
 cd packages/api
 npx prisma migrate dev --name init
 ```
@@ -148,65 +151,121 @@ Open http://localhost:5173 in your browser. You should see the Quanta logo with 
 
 ### Test the auth API
 
-**Get allowed domains:**
+Open a **second terminal** (keep `npm run dev` running in the first). All these commands can be copy-pasted.
+
+**Get allowed signup domains:**
 
 ```bash
-curl http://localhost:4000/api/auth/domains
+curl -s http://localhost:4000/api/auth/domains | python3 -m json.tool
 ```
 
-Returns: `{"domains":["spantree.com","trifork-na.com","trifork.com"]}`
+Expected: `{"domains": ["spantree.com", "trifork-na.com", "trifork.com"]}`
 
-**Register a new user:**
+**Register a new user (allowed domain):**
 
 ```bash
-curl -X POST http://localhost:4000/api/auth/register \
+curl -s -X POST http://localhost:4000/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "newuser@trifork.com",
     "password": "testpass123",
     "name": "New User",
     "projectRoles": ["Backend", "DevOps"]
-  }'
+  }' | python3 -m json.tool
 ```
 
-Returns a success response with MFA setup details (QR URI + manual key).
+Expected: 201 with `"message": "Account created..."`, MFA setup details (QR URI + manual key), and user object with `"roles": ["IC"]`.
 
 **Try a blocked domain:**
 
 ```bash
-curl -X POST http://localhost:4000/api/auth/register \
+curl -s -X POST http://localhost:4000/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "someone@gmail.com",
     "password": "testpass123",
     "name": "Blocked User",
     "projectRoles": []
-  }'
+  }' | python3 -m json.tool
 ```
 
-Returns 403: `{"error":"Email domain not authorised","allowedDomains":[...]}`
+Expected: 403 with `"error": "Email domain not authorised"` and the list of allowed domains.
+
+**Try a duplicate email:**
+
+```bash
+curl -s -X POST http://localhost:4000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "maya@trifork.com",
+    "password": "testpass123",
+    "name": "Duplicate",
+    "projectRoles": []
+  }' | python3 -m json.tool
+```
+
+Expected: 409 with `"error": "An account with this email already exists"`.
 
 **Login with a seeded user:**
 
 ```bash
-curl -X POST http://localhost:4000/api/auth/login \
+curl -s -X POST http://localhost:4000/api/auth/login \
   -H "Content-Type: application/json" \
   -c cookies.txt \
-  -d '{"email": "sarah@trifork.com", "password": "quanta123"}'
+  -d '{"email": "sarah@trifork.com", "password": "quanta123"}' | python3 -m json.tool
 ```
 
-Returns `{"status":"mfa_setup_required","mfaSetup":{...}}` (seed users haven't completed MFA setup yet).
+Expected: `{"status": "mfa_setup_required", "mfaSetup": {...}}` — seed users haven't completed MFA setup yet, so you'll get the QR code and manual key.
 
-### Browse the database
+**Try wrong password:**
 
-If you want to inspect the data visually:
+```bash
+curl -s -X POST http://localhost:4000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "sarah@trifork.com", "password": "wrongpassword"}' | python3 -m json.tool
+```
+
+Expected: 401 with `"error": "Invalid email or password"`.
+
+**Hit a protected endpoint without auth:**
+
+```bash
+curl -s http://localhost:4000/api/me | python3 -m json.tool
+```
+
+Expected: 401 with `"error": "Authentication required"`.
+
+### Browse the database visually
 
 ```bash
 cd packages/api
 npx prisma studio
 ```
 
-Opens a browser-based database explorer at http://localhost:5555. You can browse all tables, see the seeded users, their roles, projects, hour entries, etc.
+Opens **http://localhost:5555** — a browser-based database explorer. Click through the tables to see:
+
+- **users** — 13 seeded users with varied role combos (roles column shows arrays like `[IC, PM, BUL]`)
+- **business_units** — 4 BUs (US-ORD-OWLS, DK-AAR-PANDA, US-CA-SE, EU-BER-FOXES)
+- **accounts** — 4 client accounts (Meridian Corp, Pinnacle Tech, Lumen Group, Apex Industries)
+- **account_managers** — Lena linked to Meridian + Pinnacle
+- **domain_whitelist** — 3 allowed signup domains
+- **projects** — Brand Refresh 2026 with 8 weeks of data
+- **resource_assignments** — Maya, Jonas, Alex on the project with bill/cost rates
+- **hour_entries** — 24 rows of planned + actual hours across 8 weeks
+- **global_config** — contingency defaults, revenue targets, etc.
+
+Press `Ctrl+C` in that terminal when done.
+
+---
+
+## What works right now (by Drop)
+
+| Drop | What's built | How to verify |
+|------|-------------|---------------|
+| **1 — Foundation** | Prisma schema (11 entities), seed data, Docker infra | `npx prisma studio` → browse all tables |
+| **2 — Auth + RBAC** | Registration, login, MFA, domain whitelist, permission resolver, financial serialiser | curl commands above; `cd packages/api && npx vitest run` → 42 tests |
+| **3 — Core API** | *Coming next* — project CRUD, hours grid endpoints, dashboard data, export | |
+| **4 — Frontend** | *Coming next* — all React pages matching the prototyped flows | http://localhost:5173 |
 
 ---
 
@@ -239,7 +298,11 @@ cd packages/api
 npx vitest run
 ```
 
-Should show 42 tests passing across 3 test suites (permissions, serializer, TOTP).
+Should show 42 tests passing across 3 test suites:
+
+- **permissions.test.ts** — role combos, financial scoping, dashboard sections, hour editing
+- **serializer.test.ts** — field stripping per role per project context
+- **totp.test.ts** — encryption round-trip, code generation + verification
 
 ---
 
@@ -268,9 +331,15 @@ cd ../..
 npm run dev
 ```
 
+Note: If you've wiped `packages/api/.env`, copy it again from the root: `cp .env packages/api/.env`
+
 ---
 
 ## Troubleshooting
+
+**"Environment variable not found: DATABASE_URL"** — Prisma looks for `.env` in `packages/api/`, not the project root. Run `cp .env packages/api/.env` from the project root.
+
+**"Is the docker daemon running?"** — Open Docker Desktop from Applications and wait for the whale icon to settle before running docker-compose.
 
 **"Port 5432 already in use"** — You have another Postgres running. Stop it, or change the port in `docker-compose.yml`.
 
@@ -279,3 +348,5 @@ npm run dev
 **"ECONNREFUSED on Redis"** — Make sure Docker services are running: `docker-compose ps`.
 
 **npm install fails** — Make sure you're on Node 20+. Run `node --version` to check.
+
+**npm audit shows vulnerabilities** — Run `rm -rf package-lock.json node_modules packages/*/node_modules && npm install`. The package.json files pin safe versions; stale lockfiles can pull old ones.
