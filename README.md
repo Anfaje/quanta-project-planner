@@ -143,8 +143,8 @@ quanta-project-planner/
 | Drop | Contents | Status |
 |------|----------|--------|
 | 1 | Foundation: scaffolding, Prisma schema, seed, Docker | ✅ |
-| 2 | Auth + RBAC: login, MFA, domain whitelist, permission resolver | 🔜 |
-| 3 | Core API: projects, hours, assignments, dashboard, export | — |
+| 2 | Auth + RBAC: login, MFA, domain whitelist, permission resolver | ✅ |
+| 3 | Core API: projects, hours, assignments, dashboard, export | 🔜 |
 | 4 | Frontend: all pages and components | — |
 | 5 | Infrastructure: Terraform, CI/CD, deployment | — |
 | 6 | Polish: WCAG, perf, pen test, migration | — |
