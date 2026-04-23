@@ -17,7 +17,6 @@
   "dependencies": {
     "@prisma/client": "^5.14.0",
     "bcryptjs": "^2.4.3",
-    "casl": "^1.1.0",
     "@casl/ability": "^6.7.0",
     "@casl/prisma": "^1.4.0",
     "connect-redis": "^7.1.0",
@@ -28,7 +27,7 @@
     "express-session": "^1.18.0",
     "helmet": "^7.1.0",
     "ioredis": "^5.4.0",
-    "json2csv": "^6.0.0",
+    "@json2csv/node": "^7.0.6",
     "nodemailer": "^6.9.0",
     "otpauth": "^9.3.0",
     "passport": "^0.7.0",
