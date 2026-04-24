@@ -256,3 +256,59 @@ export function PageHeader({
     </div>
   );
 }
+
+// ── Modal ──
+
+/**
+ * Minimal modal: centered panel over a dimmed backdrop, closed via backdrop
+ * click or Escape. Not focus-trapped — good enough for Drop 4b, revisit in
+ * Drop 6 for full a11y.
+ */
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+  size = "md",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  children: ReactNode;
+  size?: "sm" | "md" | "lg";
+}) {
+  const widthClass = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl" }[size];
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-gray-900/40 flex items-start justify-center p-4 overflow-y-auto"
+      onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <div
+        className={`bg-white rounded-2xl border border-gray-100 shadow-2xl w-full ${widthClass} mt-[10vh] mb-8`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {title && (
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+              aria-label="Close"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  );
+}

@@ -146,7 +146,7 @@ quanta-project-planner/
 | 2 | Auth + RBAC: login, MFA, domain whitelist, permission resolver | ✅ |
 | 3 | Core API: projects, hours, assignments, dashboard, export | ✅ |
 | 4a | Frontend Phase A: shared infra, auth, dashboard, projects, hours | ✅ |
-| 4b | Frontend Phase B: wizard, admin console, financial drill-down | 🔜 |
+| 4b | Frontend Phase B: wizard, admin console, financial drill-down | ✅ |
 | 5 | Infrastructure: Terraform, CI/CD, deployment | — |
 | 6 | Polish: WCAG, perf, pen test, migration | — |
 
@@ -176,4 +176,13 @@ End-to-end frontend coverage for the main daily workflows. The app is usable for
 - **Exports** — CSV and PDF download buttons on project detail wire to the existing `/export.csv` and `/export.pdf` endpoints.
 
 Phase B remains to bring the project creation wizard, admin console (users / BUs / accounts / domains), and the financial drill-down view onto the frontend.
+
+### Drop 4b highlights (Phase B)
+
+The management surfaces are now wired up end-to-end. A BUL can onboard people through the admin console; a PM can launch a new project through the wizard; anyone with financial access can drill into cost and margin on a project:
+
+- **Project creation wizard** (`/projects/new`) — five steps (basics → resources → planned hours → financial preview → review). Auto-generates project codes from the name, pulls accounts / BUs / users from the admin endpoints, validates each step before advancing, and submits to `POST /api/projects` with assignments + planned hours flattened. A `New project` button appears on the projects list for PM / BUL / AA users.
+- **Admin console** (`/admin`) — tabbed console visible to BUL and AA. Users tab shows name, roles, BU, managed accounts, project count, and active status with inline deactivate / reactivate, a detail modal for editing roles / BU / financial access / managed accounts (AC role), and an invite modal that returns the generated accept URL until SMTP lands. Business units tab lists code / name / BUL / counts with create + activate / deactivate. Accounts tab mirrors that for clients. Domains tab inline-adds domains with live user count per whitelisted domain and a remove action.
+- **Financials tab** on project detail — renders four headline metrics (quoted fee, fee burned, cost burned, margin with delta vs plan), a cumulative fee-vs-cost line chart with both planned and actual streams, a cost-by-resource donut with a legend, and a per-resource table of planned / actual fee / cost with margin badges. Falls back to a "Financials not visible" empty state for IC viewers.
+- **Navigation** — Admin link appears in the top nav for BUL / AA only; mirror of the server-side tab visibility.
 

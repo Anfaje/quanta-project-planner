@@ -154,9 +154,11 @@ From there you can:
 - **Sign up** at `/signup` (only whitelisted email domains — see `prisma/seed.ts` for the defaults, typically `trifork.com` / `trifork-na.com` / `spantree.com`). Signup lands on an MFA setup page with a QR you scan into an authenticator app.
 - **Log in** at `/login` using the seeded test users (see the "Test users" section below if your seed produces them).
 - **Dashboard** at `/dashboard` renders the sections your role unlocks (IC → my hours; PM → project health; AC → account overview; BUL → BU health; AA → platform admin).
-- **Projects** at `/projects` shows projects in your scope with a status filter.
-- **Project detail** at `/projects/:id` has three tabs: Overview (metadata + resources), Hours grid (inline-editable with week lock/unlock and fill-remaining), and Burn chart.
-- **Invite accept** at `/invite/:token` — create an invite via the `POST /api/admin/users/invite` route (you'll get the token back in the JSON response for now; SMTP delivery lands in a later drop).
+- **Projects** at `/projects` shows projects in your scope with a status filter. PM / BUL / AA see a **New project** button.
+- **Project detail** at `/projects/:id` has four tabs: Overview (metadata + resources), Hours grid (inline-editable with week lock/unlock and fill-remaining), Burn chart, and Financials (cumulative fee/cost chart, cost-by-resource donut, per-resource financial table — hidden if you can't see financials).
+- **New project wizard** at `/projects/new` — five-step flow that creates the project and all initial hour cells in one atomic POST.
+- **Admin console** at `/admin` — visible to BUL / AA. Tabs for Users (edit roles, deactivate, invite), Business Units (create, activate/deactivate), Accounts (create, deactivate), and Domains (add/remove whitelisted signup domains). AA sees all tabs, BUL sees Users + Business Units.
+- **Invite accept** at `/invite/:token` — when you create an invite from the admin console you'll get the URL back to share (SMTP delivery lands in a later drop).
 
 > **Heads-up — new in Drop 4a:** the schema gained a `UserInvite` model. If you pulled this drop on top of an existing install, re-run `npx prisma migrate dev --name add_user_invites` (inside `packages/api/`) before starting the API, otherwise the invite routes will fail at query time.
 

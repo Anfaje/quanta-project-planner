@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import type { ProjectListItem, ProjectStatus } from "../lib/types";
+import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
-import { Card, Spinner, Alert, EmptyState, Badge, PageHeader } from "../components/ui";
+import { Card, Spinner, Alert, EmptyState, Badge, PageHeader, Button } from "../components/ui";
 import {
   formatMoney,
   formatHours,
@@ -29,6 +30,10 @@ const STATUSES: { value: ProjectStatus; label: string }[] = [
 ];
 
 export function ProjectsListPage() {
+  const me = useMe();
+  const navigate = useNavigate();
+  const canCreate = me.roles.some((r) => ["PM", "BUL", "AA"].includes(r));
+
   const [selected, setSelected] = useState<Set<ProjectStatus>>(
     new Set(["active", "on_hold"])
   );
@@ -57,6 +62,11 @@ export function ProjectsListPage() {
       <PageHeader
         title="Projects"
         subtitle="Everything in your scope"
+        actions={
+          canCreate ? (
+            <Button onClick={() => navigate("/projects/new")}>New project</Button>
+          ) : undefined
+        }
       />
 
       <div className="flex items-center gap-2 mb-4">

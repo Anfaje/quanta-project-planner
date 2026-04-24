@@ -21,6 +21,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", to: "/dashboard", show: () => true },
   { label: "Projects", to: "/projects", show: () => true },
+  { label: "Admin", to: "/admin", show: (roles) => roles.includes("BUL") || roles.includes("AA") },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {

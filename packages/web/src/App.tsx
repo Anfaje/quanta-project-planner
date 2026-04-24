@@ -8,6 +8,8 @@ import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsListPage } from "./pages/ProjectsListPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
+import { ProjectWizardPage } from "./pages/ProjectWizardPage";
+import { AdminConsolePage } from "./pages/AdminConsolePage";
 
 /**
  * Route table for Quanta.
@@ -52,10 +54,26 @@ export default function App() {
           }
         />
         <Route
+          path="/projects/new"
+          element={
+            <ProtectedRoute>
+              <ProjectWizardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/projects/:id"
           element={
             <ProtectedRoute>
               <ProjectDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <AdminConsolePage />
             </ProtectedRoute>
           }
         />

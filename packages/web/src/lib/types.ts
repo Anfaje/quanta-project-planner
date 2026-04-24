@@ -347,3 +347,58 @@ export interface Dashboard {
 export interface DomainsResponse {
   domains: string[];
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Admin console (Drop 4b)
+// ═══════════════════════════════════════════════════════════════
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  roles: Role[];
+  projectRoles: string[];
+  primaryBu: { code: string; name: string } | null;
+  financialAccess: boolean;
+  isActive: boolean;
+  createdAt: string;
+  managedAccounts: AccountLite[];
+  projectCount: number;
+}
+
+export interface AdminBusinessUnit {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  userCount: number;
+  projectCount: number;
+  bul: { id: string; name: string } | null;
+}
+
+export interface AdminAccount {
+  id: string;
+  name: string;
+  code: string;
+  isActive: boolean;
+  projectCount: number;
+  managers: UserLite[];
+}
+
+export interface AdminDomain {
+  id: string;
+  domain: string;
+  addedBy: string;
+  addedAt: string;
+  activeUsers: number;
+}
+
+// ── Invite creation response (returned from admin POST) ──
+
+export interface InviteCreatedResponse {
+  message: string;
+  email: string;
+  token: string;
+  acceptUrl: string;
+  expiresAt: string;
+}

@@ -23,20 +23,23 @@ import {
 } from "../lib/format";
 import { HoursGridPanel } from "../components/HoursGridPanel";
 import { BurnChartPanel } from "../components/BurnChartPanel";
+import { FinancialsPanel } from "../components/FinancialsPanel";
 
 /**
- * Project detail — three-tab view: overview, hours, burn.
+ * Project detail — four-tab view: overview, hours, burn, financials.
  *
  * Overview is the default: metadata + summary financials + resource table.
- * Hours and burn are heavier panels loaded lazily via their own queries.
+ * Hours, burn, and financials are heavier panels loaded lazily via their
+ * own queries when their tab activates.
  */
 
-type Tab = "overview" | "hours" | "burn";
+type Tab = "overview" | "hours" | "burn" | "financials";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "hours", label: "Hours grid" },
   { id: "burn", label: "Burn chart" },
+  { id: "financials", label: "Financials" },
 ];
 
 export function ProjectDetailPage() {
@@ -145,6 +148,7 @@ export function ProjectDetailPage() {
         {tab === "overview" && <OverviewTab data={data} />}
         {tab === "hours" && <HoursGridPanel projectId={p.id} />}
         {tab === "burn" && <BurnChartPanel projectId={p.id} />}
+        {tab === "financials" && <FinancialsPanel detail={data} />}
       </div>
     </Layout>
   );
