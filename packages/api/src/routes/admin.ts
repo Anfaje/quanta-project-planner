@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { randomBytes } from "crypto";
 import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
@@ -211,6 +212,9 @@ router.put("/users/:id/reactivate", requireRoles(Role.BUL, Role.AA), async (req:
 
 /**
  * POST /api/admin/users/invite
+ * Creates a signed invitation. In production this would email the invitee;
+ * for now the token is returned in the response so the inviter can share the
+ * link manually (SMTP delivery is deferred to Drop 6).
  */
 router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
   const parsed = inviteSchema.safeParse(req.body);
@@ -218,9 +222,62 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
     return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
   }
 
-  // TODO: Send invitation email via SMTP (Drop 3)
-  logger.info({ email: parsed.data.email, buId: parsed.data.buId, invitedBy: req.authUser!.id }, "User invited");
-  res.json({ message: "Invitation sent", email: parsed.data.email });
+  const { email, buId, name, projectRole } = parsed.data;
+
+  // Basic sanity: domain must be whitelisted (same rule as direct signup).
+  const domain = email.split("@")[1]?.toLowerCase();
+  const allowed = await prisma.domainWhitelist.findMany({ select: { domain: true } });
+  if (!allowed.some((d) => d.domain === domain)) {
+    return res.status(403).json({
+      error: "Email domain not authorised",
+      allowedDomains: allowed.map((d) => d.domain),
+    });
+  }
+
+  // Can't invite someone who already has an account.
+  const existingUser = await prisma.user.findUnique({ where: { email } });
+  if (existingUser) {
+    return res.status(409).json({ error: "An account with this email already exists" });
+  }
+
+  // BU must exist and be active.
+  const bu = await prisma.businessUnit.findUnique({ where: { id: buId } });
+  if (!bu || !bu.isActive) {
+    return res.status(400).json({ error: "Business unit not found or inactive" });
+  }
+
+  // Fresh token, 7-day expiry. Old pending invites for the same email are
+  // superseded — delete them so only the latest link works.
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+  await prisma.$transaction([
+    prisma.userInvite.deleteMany({ where: { email, acceptedAt: null } }),
+    prisma.userInvite.create({
+      data: {
+        token,
+        email,
+        name,
+        buId,
+        projectRole,
+        invitedBy: req.authUser!.id,
+        expiresAt,
+      },
+    }),
+  ]);
+
+  logger.info(
+    { email, buId, invitedBy: req.authUser!.id },
+    "User invite created (email send pending SMTP wiring)"
+  );
+
+  res.status(201).json({
+    message: "Invitation created",
+    email,
+    token,
+    acceptUrl: `/invite/${token}`,
+    expiresAt,
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

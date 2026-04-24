@@ -53,6 +53,7 @@ model User {
   projectsCreated  Project[]        @relation("ProjectCreator")
   auditLogs        AuditLog[]       @relation("AuditActor")
   domainsAdded     DomainWhitelist[] @relation("DomainAdder")
+  invitesSent      UserInvite[]     @relation("InviteSender")
 
   @@index([primaryBuId])
   @@map("users")
@@ -71,6 +72,7 @@ model BusinessUnit {
   users          User[]
   ownedProjects  Project[]       @relation("ProjectOwningBU")
   sharedProjects ProjectShare[]
+  invites        UserInvite[]
 
   @@map("business_units")
 }
@@ -222,4 +224,25 @@ model GlobalConfig {
   value String
 
   @@map("global_config")
+}
+
+// ── User Invitation ──
+
+model UserInvite {
+  id            String       @id @default(uuid())
+  token         String       @unique                                      // URL-safe random token
+  email         String                                                    // invitee email
+  name          String?                                                   // optional name pre-fill
+  buId          String       @map("bu_id")                                // BU the new user will belong to
+  bu            BusinessUnit @relation(fields: [buId], references: [id])
+  projectRole   String?      @map("project_role")                         // optional hint for the invitee
+  invitedBy     String       @map("invited_by")
+  invitedByUser User         @relation("InviteSender", fields: [invitedBy], references: [id])
+  expiresAt     DateTime     @map("expires_at")
+  acceptedAt    DateTime?    @map("accepted_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("user_invites")
 }

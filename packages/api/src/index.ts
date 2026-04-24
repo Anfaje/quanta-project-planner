@@ -16,6 +16,7 @@ import adminRoutes from "./routes/admin";
 import projectRoutes from "./routes/projects";
 import dashboardRoutes from "./routes/dashboard";
 import exportRoutes from "./routes/exports";
+import inviteRoutes from "./routes/invites";
 
 const app = express();
 const port = Number(process.env.API_PORT) || 4000;
@@ -76,6 +77,7 @@ app.get("/api/health", async (_req, res) => {
 
 // ── Routes ──
 app.use("/api/auth", authLimiter, authRoutes);
+app.use("/api/invites", authLimiter, inviteRoutes);
 app.use("/api/me", meRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/projects", projectRoutes);

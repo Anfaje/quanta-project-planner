@@ -34,6 +34,16 @@ export const updateRolesSchema = z.object({
 export const inviteSchema = z.object({
   email: z.string().email("Invalid email address"),
   buId: z.string().uuid("Invalid business unit ID"),
+  name: z.string().min(1).max(120).optional(),
+  projectRole: z.string().min(1).max(100).optional(),
+});
+
+export const acceptInviteSchema = z.object({
+  name: z.string().min(1, "Name is required").max(120),
+  password: z
+    .string()
+    .min(12, "Password must be at least 12 characters")
+    .max(100, "Password too long"),
 });
 
 // ═══════════════════════════════════════════════════════════════

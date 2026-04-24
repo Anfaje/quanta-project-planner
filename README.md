@@ -145,7 +145,8 @@ quanta-project-planner/
 | 1 | Foundation: scaffolding, Prisma schema, seed, Docker | ✅ |
 | 2 | Auth + RBAC: login, MFA, domain whitelist, permission resolver | ✅ |
 | 3 | Core API: projects, hours, assignments, dashboard, export | ✅ |
-| 4 | Frontend: all pages and components | 🔜 |
+| 4a | Frontend Phase A: shared infra, auth, dashboard, projects, hours | ✅ |
+| 4b | Frontend Phase B: wizard, admin console, financial drill-down | 🔜 |
 | 5 | Infrastructure: Terraform, CI/CD, deployment | — |
 | 6 | Polish: WCAG, perf, pen test, migration | — |
 
@@ -161,4 +162,18 @@ Full project lifecycle now reachable over HTTP:
 - **Burn chart** — `GET /api/projects/:id/burn` with cumulative planned / actual / EAC and optional fee / cost streams
 - **Adaptive dashboard** — `GET /api/dashboard` returns only the sections the caller's role union unlocks (IC → my\_hours; PM → project\_health; AC → account\_overview; BUL → bu\_health; AA → platform\_admin)
 - **Exports** — `GET /api/projects/:id/export.csv` and `.pdf`, column visibility driven by the same financial serialiser as the JSON responses
+
+### Drop 4a highlights (Phase A)
+
+End-to-end frontend coverage for the main daily workflows. The app is usable for logging hours, viewing project burn, and managing invites:
+
+- **Shared infrastructure** — typed `api` client (session cookies, `ApiError` with status + parsed details), `AuthContext` wrapping `useQuery('me')`, `ProtectedRoute` with return-to preservation, flat `Layout` shell with nav and user menu, and reusable UI primitives (Button, FormInput, Card, Badge, Spinner, Alert, EmptyState, PageHeader).
+- **Auth surfaces** — `/login`, two-step MFA (`/login/mfa` verify, `/login/mfa-setup` first-time TOTP with QR), domain-whitelisted `/signup`, and full invite accept at `/invite/:token`.
+- **Invite API** — new `UserInvite` model + routes: `GET /api/invites/:token` (public context lookup), `POST /api/invites/:token/accept` (atomic user create + MFA bootstrap), plus an updated `POST /api/admin/users/invite` that now persists the token with a 7-day expiry.
+- **Adaptive dashboard** — consumes `/api/dashboard` and renders only the sections the caller's role union unlocks, preserving server-chosen priority order.
+- **Projects list** (`/projects`) — scoped by role on the server, filterable by status (active / on_hold / complete / archived).
+- **Project detail** (`/projects/:id`) — overview tab (metadata, summary financials, resources table), hours-grid tab (inline-editable planned/actual with pending-edit batching, week lock / unlock with reason prompt, fill-remaining), burn-chart tab (Recharts line chart for planned / actual / EAC hours).
+- **Exports** — CSV and PDF download buttons on project detail wire to the existing `/export.csv` and `/export.pdf` endpoints.
+
+Phase B remains to bring the project creation wizard, admin console (users / BUs / accounts / domains), and the financial drill-down view onto the frontend.
 
