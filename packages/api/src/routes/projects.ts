@@ -1,0 +1,1152 @@
+import { Router, Request, Response } from "express";
+import { Role, Prisma } from "@prisma/client";
+import { prisma } from "../lib/prisma";
+import { logger } from "../lib/logger";
+import { requireAuth } from "../middleware/auth";
+import {
+  canAccessProject,
+  canCreateProject,
+  canEditHours,
+  canLockWeeks,
+  canManagePlan,
+  canManageProject,
+  canViewFinancials,
+} from "../lib/permissions";
+import {
+  buildProjectAccessFilter,
+  loadProjectContext,
+} from "../services/projectAccess";
+import {
+  serializeForUser,
+  serializeAssignment,
+} from "../services/financialSerializer";
+import {
+  computeAssignmentFinancials,
+  computeProjectFinancials,
+  computeBurn,
+  countProjectWeeks,
+  weekStartDate,
+} from "../services/financialCalc";
+import { logChanges } from "../services/auditLog";
+import {
+  createProjectSchema,
+  updateProjectSchema,
+  createAssignmentSchema,
+  updateAssignmentSchema,
+  hoursBatchSchema,
+  unlockWeekSchema,
+} from "../utils/validation";
+
+const router = Router();
+router.use(requireAuth);
+
+// ═══════════════════════════════════════════════════════════════
+// PROJECT CRUD
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/projects
+ * List projects the caller can see. Scoped by buildProjectAccessFilter.
+ * Query params: ?status=active|on_hold|complete|archived (optional, repeatable)
+ */
+router.get("/", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const accessFilter = buildProjectAccessFilter(user);
+
+  const statuses = ([] as string[]).concat((req.query.status as any) ?? []);
+  const statusFilter =
+    statuses.length > 0
+      ? { status: { in: statuses as any[] } }
+      : {};
+
+  const projects = await prisma.project.findMany({
+    where: { AND: [accessFilter, statusFilter] },
+    select: {
+      id: true,
+      name: true,
+      projectCode: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+      contingencyPct: true,
+      accountId: true,
+      owningBuId: true,
+      account: { select: { id: true, name: true, code: true } },
+      owningBu: { select: { id: true, code: true, name: true } },
+      shares: { select: { sharedWithBuId: true } },
+      _count: { select: { assignments: true } },
+    },
+    orderBy: [{ status: "asc" }, { startDate: "desc" }],
+  });
+
+  const rows = projects.map((p) => {
+    const ctx = {
+      projectId: p.id,
+      projectAccountId: p.accountId,
+      projectOwningBuId: p.owningBuId,
+      projectSharedBuIds: p.shares.map((s) => s.sharedWithBuId),
+    };
+    return serializeForUser(
+      {
+        id: p.id,
+        name: p.name,
+        projectCode: p.projectCode,
+        status: p.status,
+        startDate: p.startDate,
+        endDate: p.endDate,
+        contingencyPct: Number(p.contingencyPct),
+        account: p.account,
+        owningBu: p.owningBu,
+        resourceCount: p._count.assignments,
+      },
+      user,
+      ctx
+    );
+  });
+
+  res.json({ projects: rows });
+});
+
+/**
+ * GET /api/projects/:id
+ * Project detail with assignments + computed financials (scoped).
+ */
+router.get("/:id", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: ctx.id },
+    include: {
+      account: { select: { id: true, name: true, code: true } },
+      owningBu: { select: { id: true, code: true, name: true } },
+      createdBy: { select: { id: true, name: true, email: true } },
+      shares: {
+        include: { sharedWithBu: { select: { id: true, code: true, name: true } } },
+      },
+      assignments: {
+        include: {
+          user: { select: { id: true, name: true, email: true, primaryBuId: true } },
+          hourEntries: true,
+        },
+      },
+    },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  // IC sees only their own assignment row.
+  const isICOnly =
+    user.roles.includes(Role.IC) &&
+    !user.roles.includes(Role.PM) &&
+    !user.roles.includes(Role.AC) &&
+    !user.roles.includes(Role.BUL) &&
+    !user.roles.includes(Role.AA);
+  const visibleAssignments = isICOnly
+    ? project.assignments.filter((a) => a.userId === user.id)
+    : project.assignments;
+
+  const totalWeeks = countProjectWeeks(project.startDate, project.endDate);
+
+  const assignmentRows = visibleAssignments.map((a) => {
+    const fin = computeAssignmentFinancials({
+      billRate: a.billRate,
+      costRate: a.costRate,
+      entries: a.hourEntries,
+    });
+    return serializeAssignment(
+      {
+        id: a.id,
+        userId: a.userId,
+        user: a.user,
+        projectRole: a.projectRole,
+        businessUnit: a.businessUnit,
+        billRate: Number(a.billRate),
+        costRate: Number(a.costRate),
+        plannedHours: fin.plannedHours,
+        actualHours: fin.actualHours,
+        plannedFee: fin.plannedFee,
+        actualFee: fin.actualFee,
+        plannedCost: fin.plannedCost,
+        actualCost: fin.actualCost,
+      },
+      user,
+      ctx.ctx
+    );
+  });
+
+  const projectFin = computeProjectFinancials(
+    project.assignments.map((a) => ({
+      billRate: a.billRate,
+      costRate: a.costRate,
+      entries: a.hourEntries,
+    })),
+    project.contingencyPct
+  );
+
+  const financials = serializeForUser(
+    {
+      totalPlannedHours: projectFin.totalPlannedHours,
+      totalActualHours: projectFin.totalActualHours,
+      totalFee: projectFin.totalFee,
+      totalActualFee: projectFin.totalActualFee,
+      totalCost: projectFin.totalCost,
+      totalActualCost: projectFin.totalActualCost,
+      contingencyAmt: projectFin.contingencyAmt,
+      adjustedFee: projectFin.adjustedFee,
+      marginPct: projectFin.marginPct,
+      actualMarginPct: projectFin.actualMarginPct,
+      eacHours: projectFin.eacHours,
+    },
+    user,
+    ctx.ctx
+  );
+
+  res.json({
+    project: {
+      id: project.id,
+      name: project.name,
+      projectCode: project.projectCode,
+      status: project.status,
+      description: project.description,
+      startDate: project.startDate,
+      endDate: project.endDate,
+      contingencyPct: Number(project.contingencyPct),
+      totalWeeks,
+      account: project.account,
+      owningBu: project.owningBu,
+      sharedWithBus: project.shares.map((s) => s.sharedWithBu),
+      createdBy: project.createdBy,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    },
+    assignments: assignmentRows,
+    financials,
+    capabilities: {
+      canManage: canManageProject(user),
+      canManagePlan: canManagePlan(user),
+      canLockWeeks: canLockWeeks(user),
+    },
+  });
+});
+
+/**
+ * POST /api/projects
+ * Wizard payload: atomically create project + assignments + planned-hour entries.
+ */
+router.post("/", async (req: Request, res: Response) => {
+  const parsed = createProjectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+  const data = parsed.data;
+  const user = req.authUser!;
+
+  if (!canCreateProject(user, data.accountId, data.owningBuId)) {
+    return res.status(403).json({ error: "Cannot create project in this account/BU" });
+  }
+
+  // Verify references exist and are active.
+  const [account, bu] = await Promise.all([
+    prisma.account.findUnique({ where: { id: data.accountId } }),
+    prisma.businessUnit.findUnique({ where: { id: data.owningBuId } }),
+  ]);
+  if (!account || !account.isActive) return res.status(400).json({ error: "Account not found or inactive" });
+  if (!bu || !bu.isActive) return res.status(400).json({ error: "Business unit not found or inactive" });
+
+  // Project code uniqueness
+  const codeClash = await prisma.project.findUnique({ where: { projectCode: data.projectCode } });
+  if (codeClash) return res.status(409).json({ error: "Project code already in use" });
+
+  // Verify all assignment users exist + active
+  const userIds = data.assignments.map((a) => a.userId);
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds }, isActive: true },
+    select: { id: true, primaryBuId: true },
+  });
+  if (users.length !== userIds.length) {
+    return res.status(400).json({ error: "One or more assigned users not found or inactive" });
+  }
+  const userBuMap = new Map(users.map((u) => [u.id, u.primaryBuId]));
+
+  const startDate = new Date(data.startDate + "T00:00:00Z");
+  const endDate = new Date(data.endDate + "T00:00:00Z");
+  const totalWeeks = countProjectWeeks(startDate, endDate);
+
+  // Validate planned-hour entries reference in-range weeks + valid users.
+  for (const ph of data.plannedHours) {
+    if (ph.projectWeek >= totalWeeks) {
+      return res
+        .status(400)
+        .json({ error: `plannedHours.projectWeek ${ph.projectWeek} out of range (0..${totalWeeks - 1})` });
+    }
+    if (!userIds.includes(ph.userId)) {
+      return res
+        .status(400)
+        .json({ error: `plannedHours references userId not in assignments: ${ph.userId}` });
+    }
+  }
+
+  // Build planned-hours lookup keyed by "userId|week"
+  const plannedMap = new Map<string, number>();
+  for (const ph of data.plannedHours) {
+    plannedMap.set(`${ph.userId}|${ph.projectWeek}`, ph.plannedHours);
+  }
+
+  // Atomic create: project + assignments + pre-populated hour entries (all weeks).
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const project = await tx.project.create({
+        data: {
+          name: data.name,
+          accountId: data.accountId,
+          owningBuId: data.owningBuId,
+          projectCode: data.projectCode,
+          startDate,
+          endDate,
+          contingencyPct: new Prisma.Decimal(data.contingencyPct),
+          description: data.description,
+          createdById: user.id,
+          status: "active",
+        },
+      });
+
+      for (const a of data.assignments) {
+        const assignment = await tx.resourceAssignment.create({
+          data: {
+            projectId: project.id,
+            userId: a.userId,
+            projectRole: a.projectRole,
+            billRate: new Prisma.Decimal(a.billRate),
+            costRate: new Prisma.Decimal(a.costRate),
+            businessUnit: userBuMap.get(a.userId) ?? "",
+          },
+        });
+
+        // Pre-populate all weeks for this assignment.
+        const entries = Array.from({ length: totalWeeks }, (_, w) => {
+          const planned = plannedMap.get(`${a.userId}|${w}`);
+          return {
+            assignmentId: assignment.id,
+            projectWeek: w,
+            weekStartDate: weekStartDate(startDate, w),
+            plannedHours: planned != null ? new Prisma.Decimal(planned) : null,
+            actualHours: null,
+            locked: false,
+          };
+        });
+        if (entries.length > 0) {
+          await tx.hourEntry.createMany({ data: entries });
+        }
+      }
+
+      return project;
+    });
+
+    await logChanges("Project", result.id, user.id, [
+      { field: "created", oldValue: null, newValue: JSON.stringify({ name: result.name, code: result.projectCode }) },
+    ]);
+
+    logger.info({ projectId: result.id, code: result.projectCode, actor: user.id }, "Project created");
+    res.status(201).json({ projectId: result.id, projectCode: result.projectCode });
+  } catch (err: any) {
+    logger.error({ err }, "Failed to create project");
+    res.status(500).json({ error: "Failed to create project" });
+  }
+});
+
+/**
+ * PATCH /api/projects/:id
+ * Update mutable fields on a project.
+ */
+router.patch("/:id", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = updateProjectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user)) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+
+  if (ctx.status === "archived") {
+    return res.status(409).json({ error: "Archived projects are read-only" });
+  }
+
+  const data = parsed.data;
+  const updateData: Prisma.ProjectUpdateInput = {};
+  const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
+
+  if (data.name !== undefined) {
+    updateData.name = data.name;
+    changes.push({ field: "name", oldValue: ctx.name, newValue: data.name });
+  }
+  if (data.description !== undefined) {
+    updateData.description = data.description;
+    changes.push({ field: "description", oldValue: null, newValue: data.description });
+  }
+  if (data.startDate !== undefined) {
+    updateData.startDate = new Date(data.startDate + "T00:00:00Z");
+    changes.push({
+      field: "start_date",
+      oldValue: ctx.startDate.toISOString().slice(0, 10),
+      newValue: data.startDate,
+    });
+  }
+  if (data.endDate !== undefined) {
+    updateData.endDate = new Date(data.endDate + "T00:00:00Z");
+    changes.push({
+      field: "end_date",
+      oldValue: ctx.endDate.toISOString().slice(0, 10),
+      newValue: data.endDate,
+    });
+  }
+  if (data.contingencyPct !== undefined) {
+    updateData.contingencyPct = new Prisma.Decimal(data.contingencyPct);
+    changes.push({
+      field: "contingency_pct",
+      oldValue: String(Number(ctx.contingencyPct)),
+      newValue: String(data.contingencyPct),
+    });
+  }
+  if (data.status !== undefined) {
+    updateData.status = data.status;
+    changes.push({ field: "status", oldValue: ctx.status, newValue: data.status });
+  }
+
+  if (changes.length === 0) {
+    return res.json({ message: "No changes" });
+  }
+
+  await prisma.project.update({ where: { id: ctx.id }, data: updateData });
+  await logChanges("Project", ctx.id, user.id, changes);
+
+  logger.info({ projectId: ctx.id, actor: user.id, changes: changes.map((c) => c.field) }, "Project updated");
+  res.json({ message: "Project updated", changes });
+});
+
+/**
+ * POST /api/projects/:id/archive
+ * Shortcut for status=archived with its own audit entry.
+ */
+router.post("/:id/archive", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user)) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+  if (ctx.status === "archived") {
+    return res.status(409).json({ error: "Project already archived" });
+  }
+
+  await prisma.project.update({ where: { id: ctx.id }, data: { status: "archived" } });
+  await logChanges("Project", ctx.id, user.id, [
+    { field: "status", oldValue: ctx.status, newValue: "archived" },
+  ]);
+
+  res.json({ message: "Project archived" });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// RESOURCE ASSIGNMENTS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/projects/:id/assignments
+ * Add a resource to the project. Pre-populates hour entries for all weeks.
+ */
+router.post("/:id/assignments", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = createAssignmentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user)) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const data = parsed.data;
+
+  const targetUser = await prisma.user.findUnique({ where: { id: data.userId } });
+  if (!targetUser || !targetUser.isActive) {
+    return res.status(400).json({ error: "User not found or inactive" });
+  }
+
+  const existing = await prisma.resourceAssignment.findUnique({
+    where: { projectId_userId: { projectId: ctx.id, userId: data.userId } },
+  });
+  if (existing) return res.status(409).json({ error: "User already assigned to this project" });
+
+  const totalWeeks = countProjectWeeks(ctx.startDate, ctx.endDate);
+
+  const assignment = await prisma.$transaction(async (tx) => {
+    const a = await tx.resourceAssignment.create({
+      data: {
+        projectId: ctx.id,
+        userId: data.userId,
+        projectRole: data.projectRole,
+        billRate: new Prisma.Decimal(data.billRate),
+        costRate: new Prisma.Decimal(data.costRate),
+        businessUnit: targetUser.primaryBuId,
+      },
+    });
+    if (totalWeeks > 0) {
+      await tx.hourEntry.createMany({
+        data: Array.from({ length: totalWeeks }, (_, w) => ({
+          assignmentId: a.id,
+          projectWeek: w,
+          weekStartDate: weekStartDate(ctx.startDate, w),
+          plannedHours: null,
+          actualHours: null,
+          locked: false,
+        })),
+      });
+    }
+    return a;
+  });
+
+  await logChanges("ResourceAssignment", assignment.id, user.id, [
+    {
+      field: "created",
+      oldValue: null,
+      newValue: JSON.stringify({
+        projectId: ctx.id,
+        userId: data.userId,
+        projectRole: data.projectRole,
+      }),
+    },
+  ]);
+
+  logger.info({ assignmentId: assignment.id, projectId: ctx.id, actor: user.id }, "Assignment created");
+  res.status(201).json({ assignmentId: assignment.id });
+});
+
+/**
+ * PATCH /api/projects/:id/assignments/:assignmentId
+ * Update role / bill rate / cost rate.
+ */
+router.patch("/:id/assignments/:assignmentId", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = updateAssignmentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user)) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const existing = await prisma.resourceAssignment.findUnique({
+    where: { id: req.params.assignmentId },
+  });
+  if (!existing || existing.projectId !== ctx.id) {
+    return res.status(404).json({ error: "Assignment not found" });
+  }
+
+  const data = parsed.data;
+  const updateData: Prisma.ResourceAssignmentUpdateInput = {};
+  const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
+
+  if (data.projectRole !== undefined && data.projectRole !== existing.projectRole) {
+    updateData.projectRole = data.projectRole;
+    changes.push({ field: "project_role", oldValue: existing.projectRole, newValue: data.projectRole });
+  }
+  if (data.billRate !== undefined && Number(existing.billRate) !== data.billRate) {
+    updateData.billRate = new Prisma.Decimal(data.billRate);
+    changes.push({
+      field: "bill_rate",
+      oldValue: String(Number(existing.billRate)),
+      newValue: String(data.billRate),
+    });
+  }
+  if (data.costRate !== undefined && Number(existing.costRate) !== data.costRate) {
+    updateData.costRate = new Prisma.Decimal(data.costRate);
+    changes.push({
+      field: "cost_rate",
+      oldValue: String(Number(existing.costRate)),
+      newValue: String(data.costRate),
+    });
+  }
+
+  if (changes.length === 0) {
+    return res.json({ message: "No changes" });
+  }
+
+  await prisma.resourceAssignment.update({ where: { id: existing.id }, data: updateData });
+  await logChanges("ResourceAssignment", existing.id, user.id, changes);
+
+  res.json({ message: "Assignment updated", changes });
+});
+
+/**
+ * DELETE /api/projects/:id/assignments/:assignmentId
+ * Remove a resource. Cascades to hour entries (via schema onDelete: Cascade).
+ */
+router.delete("/:id/assignments/:assignmentId", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user)) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const existing = await prisma.resourceAssignment.findUnique({
+    where: { id: req.params.assignmentId },
+  });
+  if (!existing || existing.projectId !== ctx.id) {
+    return res.status(404).json({ error: "Assignment not found" });
+  }
+
+  await prisma.resourceAssignment.delete({ where: { id: existing.id } });
+  await logChanges("ResourceAssignment", existing.id, user.id, [
+    { field: "deleted", oldValue: JSON.stringify({ userId: existing.userId }), newValue: null },
+  ]);
+
+  logger.info({ assignmentId: existing.id, projectId: ctx.id, actor: user.id }, "Assignment deleted");
+  res.json({ message: "Assignment removed" });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// HOURS GRID
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/projects/:id/hours
+ * Full grid for the project. IC sees only their own row.
+ */
+router.get("/:id/hours", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+
+  const isICOnly =
+    user.roles.includes(Role.IC) &&
+    !user.roles.includes(Role.PM) &&
+    !user.roles.includes(Role.AC) &&
+    !user.roles.includes(Role.BUL) &&
+    !user.roles.includes(Role.AA);
+
+  const assignments = await prisma.resourceAssignment.findMany({
+    where: {
+      projectId: ctx.id,
+      ...(isICOnly ? { userId: user.id } : {}),
+    },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      hourEntries: { orderBy: { projectWeek: "asc" } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const totalWeeks = countProjectWeeks(ctx.startDate, ctx.endDate);
+  const weekStart = new Date(ctx.startDate);
+
+  // Derive per-week lock state: a week is "locked" when all entries that exist
+  // for that week are locked.
+  const lockByWeek: Record<number, { locked: boolean; entries: number }> = {};
+  for (const a of assignments) {
+    for (const e of a.hourEntries) {
+      const slot = lockByWeek[e.projectWeek] ?? { locked: true, entries: 0 };
+      slot.entries += 1;
+      if (!e.locked) slot.locked = false;
+      lockByWeek[e.projectWeek] = slot;
+    }
+  }
+
+  const weeks = Array.from({ length: totalWeeks }, (_, w) => ({
+    week: w,
+    weekStartDate: weekStartDate(weekStart, w).toISOString().slice(0, 10),
+    locked: lockByWeek[w]?.entries > 0 ? lockByWeek[w].locked : false,
+  }));
+
+  const rows = assignments.map((a) =>
+    serializeAssignment(
+      {
+        id: a.id,
+        userId: a.userId,
+        user: a.user,
+        projectRole: a.projectRole,
+        businessUnit: a.businessUnit,
+        billRate: Number(a.billRate),
+        costRate: Number(a.costRate),
+        entries: a.hourEntries.map((e) => ({
+          week: e.projectWeek,
+          plannedHours: e.plannedHours != null ? Number(e.plannedHours) : null,
+          actualHours: e.actualHours != null ? Number(e.actualHours) : null,
+          locked: e.locked,
+        })),
+      },
+      user,
+      ctx.ctx
+    )
+  );
+
+  res.json({
+    projectId: ctx.id,
+    totalWeeks,
+    weeks,
+    assignments: rows,
+    capabilities: {
+      canEditOwnActuals: user.roles.includes(Role.IC),
+      canManagePlan: canManagePlan(user),
+      canLockWeeks: canLockWeeks(user),
+    },
+  });
+});
+
+/**
+ * PUT /api/projects/:id/hours
+ * Batch update planned / actual hours.
+ *
+ * Per-update rules:
+ *   - Entry must exist and belong to a non-locked week.
+ *   - To change plannedHours: canManagePlan.
+ *   - To change actualHours: canEditHours (IC restricted to own rows).
+ *   - actualHours cannot be edited on locked entries.
+ */
+router.put("/:id/hours", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = hoursBatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const assignmentIds = [...new Set(parsed.data.updates.map((u) => u.assignmentId))];
+  const assignments = await prisma.resourceAssignment.findMany({
+    where: { id: { in: assignmentIds }, projectId: ctx.id },
+    select: { id: true, userId: true },
+  });
+  const assignmentMap = new Map(assignments.map((a) => [a.id, a]));
+
+  // Reject if any assignmentId in the batch doesn't belong to this project.
+  for (const u of parsed.data.updates) {
+    if (!assignmentMap.has(u.assignmentId)) {
+      return res.status(400).json({ error: `Assignment ${u.assignmentId} not found on this project` });
+    }
+  }
+
+  // Pre-authorize every update.
+  const canManagePlanHere = canManagePlan(user);
+  for (const u of parsed.data.updates) {
+    const a = assignmentMap.get(u.assignmentId)!;
+    const isOwn = a.userId === user.id;
+
+    if (u.plannedHours !== undefined && !canManagePlanHere) {
+      return res.status(403).json({ error: "Cannot edit planned hours (need PM/AC/BUL role)" });
+    }
+    if (u.actualHours !== undefined && !canEditHours(user, isOwn)) {
+      return res.status(403).json({ error: "Cannot edit actual hours for this row" });
+    }
+  }
+
+  // Load existing entries to diff.
+  const existingEntries = await prisma.hourEntry.findMany({
+    where: {
+      assignmentId: { in: assignmentIds },
+      projectWeek: { in: parsed.data.updates.map((u) => u.projectWeek) },
+    },
+  });
+  const entryMap = new Map(
+    existingEntries.map((e) => [`${e.assignmentId}|${e.projectWeek}`, e])
+  );
+
+  const auditEntries: Array<{
+    entityId: string;
+    field: string;
+    oldValue: string | null;
+    newValue: string | null;
+  }> = [];
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const u of parsed.data.updates) {
+        const key = `${u.assignmentId}|${u.projectWeek}`;
+        const existing = entryMap.get(key);
+
+        if (!existing) {
+          throw new HttpError(
+            404,
+            `Entry not found for assignment ${u.assignmentId} week ${u.projectWeek}`
+          );
+        }
+        if (existing.locked) {
+          throw new HttpError(
+            409,
+            `Week ${u.projectWeek} is locked for assignment ${u.assignmentId}`
+          );
+        }
+
+        const updateData: Prisma.HourEntryUpdateInput = {};
+
+        if (u.plannedHours !== undefined) {
+          const newVal = u.plannedHours == null ? null : new Prisma.Decimal(u.plannedHours);
+          updateData.plannedHours = newVal;
+          const oldStr = existing.plannedHours != null ? String(Number(existing.plannedHours)) : null;
+          const newStr = u.plannedHours != null ? String(u.plannedHours) : null;
+          if (oldStr !== newStr) {
+            auditEntries.push({
+              entityId: existing.id,
+              field: "planned_hours",
+              oldValue: oldStr,
+              newValue: newStr,
+            });
+          }
+        }
+        if (u.actualHours !== undefined) {
+          const newVal = u.actualHours == null ? null : new Prisma.Decimal(u.actualHours);
+          updateData.actualHours = newVal;
+          const oldStr = existing.actualHours != null ? String(Number(existing.actualHours)) : null;
+          const newStr = u.actualHours != null ? String(u.actualHours) : null;
+          if (oldStr !== newStr) {
+            auditEntries.push({
+              entityId: existing.id,
+              field: "actual_hours",
+              oldValue: oldStr,
+              newValue: newStr,
+            });
+          }
+        }
+
+        if (Object.keys(updateData).length > 0) {
+          await tx.hourEntry.update({ where: { id: existing.id }, data: updateData });
+        }
+      }
+    });
+  } catch (err) {
+    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+    logger.error({ err }, "Hours batch update failed");
+    return res.status(500).json({ error: "Failed to update hours" });
+  }
+
+  if (auditEntries.length > 0) {
+    await prisma.auditLog.createMany({
+      data: auditEntries.map((a) => ({
+        entityType: "HourEntry",
+        entityId: a.entityId,
+        field: a.field,
+        oldValue: a.oldValue,
+        newValue: a.newValue,
+        changedBy: user.id,
+      })),
+    });
+  }
+
+  res.json({
+    message: "Hours updated",
+    updatesApplied: parsed.data.updates.length,
+    fieldsChanged: auditEntries.length,
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// WEEK LOCK / UNLOCK / FILL REMAINING
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/projects/:id/weeks/:week/lock
+ * Lock all entries for the given project-week.
+ */
+router.post("/:id/weeks/:week/lock", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const week = Number(req.params.week);
+  if (!Number.isInteger(week) || week < 0) {
+    return res.status(400).json({ error: "Invalid week index" });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canLockWeeks(user)) {
+    return res.status(403).json({ error: "Cannot lock weeks on this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const entries = await prisma.hourEntry.findMany({
+    where: {
+      assignment: { projectId: ctx.id },
+      projectWeek: week,
+    },
+    select: { id: true, locked: true },
+  });
+  if (entries.length === 0) return res.status(404).json({ error: "No entries found for this week" });
+
+  const toLock = entries.filter((e) => !e.locked).map((e) => e.id);
+  if (toLock.length === 0) return res.status(409).json({ error: "Week is already locked" });
+
+  await prisma.$transaction([
+    prisma.hourEntry.updateMany({ where: { id: { in: toLock } }, data: { locked: true } }),
+    prisma.auditLog.createMany({
+      data: toLock.map((id) => ({
+        entityType: "HourEntry",
+        entityId: id,
+        field: "locked",
+        oldValue: "false",
+        newValue: "true",
+        changedBy: user.id,
+      })),
+    }),
+  ]);
+
+  logger.info({ projectId: ctx.id, week, entriesLocked: toLock.length, actor: user.id }, "Week locked");
+  res.json({
+    projectId: ctx.id,
+    week,
+    locked: true,
+    entriesAffected: toLock.length,
+    lockedBy: user.id,
+    lockedAt: new Date().toISOString(),
+  });
+});
+
+/**
+ * POST /api/projects/:id/weeks/:week/unlock
+ * Unlock all entries for the given project-week. No frequency limits — the
+ * audit trail is the accountability mechanism. Optional reason recorded on
+ * every affected entry's audit row.
+ */
+router.post("/:id/weeks/:week/unlock", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = unlockWeekSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+  const reason = parsed.data.reason;
+
+  const week = Number(req.params.week);
+  if (!Number.isInteger(week) || week < 0) {
+    return res.status(400).json({ error: "Invalid week index" });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canLockWeeks(user)) {
+    return res.status(403).json({ error: "Cannot unlock weeks on this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const entries = await prisma.hourEntry.findMany({
+    where: {
+      assignment: { projectId: ctx.id },
+      projectWeek: week,
+    },
+    select: { id: true, locked: true },
+  });
+  if (entries.length === 0) return res.status(404).json({ error: "No entries found for this week" });
+
+  // Guard rail: if any entry is already unlocked, reject — prevents the caller
+  // from acting on a stale UI where someone else just reopened the week.
+  const alreadyUnlocked = entries.filter((e) => !e.locked);
+  if (alreadyUnlocked.length > 0) {
+    return res.status(409).json({
+      error: "Week is not fully locked",
+      details: `${alreadyUnlocked.length} entr${alreadyUnlocked.length === 1 ? "y is" : "ies are"} already unlocked`,
+    });
+  }
+
+  const toUnlock = entries.map((e) => e.id);
+  const newValuePayload = reason ? JSON.stringify({ locked: false, reason }) : "false";
+
+  await prisma.$transaction([
+    prisma.hourEntry.updateMany({ where: { id: { in: toUnlock } }, data: { locked: false } }),
+    prisma.auditLog.createMany({
+      data: toUnlock.map((id) => ({
+        entityType: "HourEntry",
+        entityId: id,
+        field: "locked",
+        oldValue: "true",
+        newValue: newValuePayload,
+        changedBy: user.id,
+      })),
+    }),
+  ]);
+
+  logger.info(
+    { projectId: ctx.id, week, entriesUnlocked: toUnlock.length, actor: user.id, reason },
+    "Week unlocked"
+  );
+  res.json({
+    projectId: ctx.id,
+    week,
+    locked: false,
+    entriesAffected: toUnlock.length,
+    unlockedBy: user.id,
+    unlockedAt: new Date().toISOString(),
+    reason: reason ?? null,
+  });
+});
+
+/**
+ * POST /api/projects/:id/weeks/:week/fill-remaining
+ * For the project-week, copy plannedHours -> actualHours on entries where
+ * locked=false, actualHours IS NULL, and plannedHours > 0.
+ * IC callers are restricted to their own assignment rows.
+ */
+router.post("/:id/weeks/:week/fill-remaining", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const week = Number(req.params.week);
+  if (!Number.isInteger(week) || week < 0) {
+    return res.status(400).json({ error: "Invalid week index" });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const isICOnly =
+    user.roles.includes(Role.IC) &&
+    !user.roles.includes(Role.PM) &&
+    !user.roles.includes(Role.AC) &&
+    !user.roles.includes(Role.BUL) &&
+    !user.roles.includes(Role.AA);
+
+  if (!canEditHours(user, isICOnly)) {
+    return res.status(403).json({ error: "Cannot edit hours on this project" });
+  }
+
+  // Candidates: non-locked, actual is null, planned > 0, on this project-week.
+  const candidates = await prisma.hourEntry.findMany({
+    where: {
+      projectWeek: week,
+      locked: false,
+      actualHours: null,
+      plannedHours: { gt: 0 },
+      assignment: {
+        projectId: ctx.id,
+        ...(isICOnly ? { userId: user.id } : {}),
+      },
+    },
+    select: { id: true, plannedHours: true },
+  });
+
+  if (candidates.length === 0) {
+    return res.json({ message: "Nothing to fill", entriesAffected: 0 });
+  }
+
+  // One UPDATE per candidate so the audit rows carry the actual value copied.
+  await prisma.$transaction(async (tx) => {
+    for (const c of candidates) {
+      await tx.hourEntry.update({
+        where: { id: c.id },
+        data: { actualHours: c.plannedHours },
+      });
+    }
+    await tx.auditLog.createMany({
+      data: candidates.map((c) => ({
+        entityType: "HourEntry",
+        entityId: c.id,
+        field: "actual_hours",
+        oldValue: null,
+        newValue: c.plannedHours != null ? String(Number(c.plannedHours)) : null,
+        changedBy: user.id,
+      })),
+    });
+  });
+
+  logger.info(
+    { projectId: ctx.id, week, filled: candidates.length, actor: user.id },
+    "Fill-remaining applied"
+  );
+  res.json({ message: "Filled remaining entries", entriesAffected: candidates.length });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// BURN CHART
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/projects/:id/burn
+ * Cumulative planned vs actual hours per week (+ fee/cost if allowed).
+ */
+router.get("/:id/burn", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+
+  const assignments = await prisma.resourceAssignment.findMany({
+    where: { projectId: ctx.id },
+    include: { hourEntries: true },
+  });
+
+  // canViewFinancials already in scope via serializeForUser; reuse the same
+  // gate to decide whether the burn series includes fee/cost streams.
+  const includeFinancials = canViewFinancials(user, ctx.ctx);
+
+  const series = computeBurn(
+    assignments.map((a) => ({
+      billRate: a.billRate,
+      costRate: a.costRate,
+      entries: a.hourEntries.map((e) => ({
+        projectWeek: e.projectWeek,
+        weekStartDate: e.weekStartDate,
+        plannedHours: e.plannedHours,
+        actualHours: e.actualHours,
+      })),
+    })),
+    includeFinancials
+  );
+
+  res.json({
+    projectId: ctx.id,
+    includesFinancials: includeFinancials,
+    series,
+  });
+});
+
+// ── Tiny internal error helper ──
+
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+export default router;

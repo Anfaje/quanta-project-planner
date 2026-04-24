@@ -144,7 +144,21 @@ quanta-project-planner/
 |------|----------|--------|
 | 1 | Foundation: scaffolding, Prisma schema, seed, Docker | ✅ |
 | 2 | Auth + RBAC: login, MFA, domain whitelist, permission resolver | ✅ |
-| 3 | Core API: projects, hours, assignments, dashboard, export | 🔜 |
-| 4 | Frontend: all pages and components | — |
+| 3 | Core API: projects, hours, assignments, dashboard, export | ✅ |
+| 4 | Frontend: all pages and components | 🔜 |
 | 5 | Infrastructure: Terraform, CI/CD, deployment | — |
 | 6 | Polish: WCAG, perf, pen test, migration | — |
+
+### Drop 3 highlights
+
+Full project lifecycle now reachable over HTTP:
+
+- **Projects** — `GET/POST/PATCH /api/projects`, scoped list by role, wizard create atomically populates all assignments and every (assignment × week) hour cell
+- **Assignments** — add / update / remove resources; rates and roles tracked through the audit log
+- **Hours grid** — `GET/PUT /api/projects/:id/hours` with row-level permissions (IC restricted to own rows, planned hours require PM/AC/BUL)
+- **Week lock / unlock** — per `(project, week)` transactional flip, unlock takes an optional reason and every entry is audited
+- **Fill-remaining** — one-click copy of planned→actual on non-locked, NULL cells
+- **Burn chart** — `GET /api/projects/:id/burn` with cumulative planned / actual / EAC and optional fee / cost streams
+- **Adaptive dashboard** — `GET /api/dashboard` returns only the sections the caller's role union unlocks (IC → my\_hours; PM → project\_health; AC → account\_overview; BUL → bu\_health; AA → platform\_admin)
+- **Exports** — `GET /api/projects/:id/export.csv` and `.pdf`, column visibility driven by the same financial serialiser as the JSON responses
+

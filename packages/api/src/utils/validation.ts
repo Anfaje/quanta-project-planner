@@ -35,3 +35,93 @@ export const inviteSchema = z.object({
   email: z.string().email("Invalid email address"),
   buId: z.string().uuid("Invalid business unit ID"),
 });
+
+// ═══════════════════════════════════════════════════════════════
+// DROP 3 — Projects, Assignments, Hours
+// ═══════════════════════════════════════════════════════════════
+
+const dateStringSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD");
+
+const wizardAssignmentSchema = z.object({
+  userId: z.string().uuid(),
+  projectRole: z.string().min(1).max(100),
+  billRate: z.number().min(0).max(10_000),
+  costRate: z.number().min(0).max(10_000),
+});
+
+const wizardPlannedHourSchema = z.object({
+  userId: z.string().uuid(),
+  projectWeek: z.number().int().min(0).max(520),
+  plannedHours: z.number().min(0).max(168),
+});
+
+export const createProjectSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    accountId: z.string().uuid(),
+    owningBuId: z.string().uuid(),
+    projectCode: z
+      .string()
+      .min(1)
+      .max(50)
+      .regex(/^[A-Z0-9-]+$/, "Project code: uppercase letters, digits, hyphens"),
+    startDate: dateStringSchema,
+    endDate: dateStringSchema,
+    contingencyPct: z.number().min(0).max(1).default(0.15),
+    description: z.string().max(2000).optional(),
+    assignments: z.array(wizardAssignmentSchema).min(1, "At least one resource is required"),
+    plannedHours: z.array(wizardPlannedHourSchema).default([]),
+  })
+  .refine((d) => new Date(d.startDate) <= new Date(d.endDate), {
+    message: "End date must be on or after start date",
+    path: ["endDate"],
+  })
+  .refine(
+    (d) => {
+      const ids = d.assignments.map((a) => a.userId);
+      return new Set(ids).size === ids.length;
+    },
+    { message: "Duplicate userId in assignments", path: ["assignments"] }
+  );
+
+export const updateProjectSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  startDate: dateStringSchema.optional(),
+  endDate: dateStringSchema.optional(),
+  contingencyPct: z.number().min(0).max(1).optional(),
+  description: z.string().max(2000).nullable().optional(),
+  status: z.enum(["active", "on_hold", "complete", "archived"]).optional(),
+});
+
+export const createAssignmentSchema = z.object({
+  userId: z.string().uuid(),
+  projectRole: z.string().min(1).max(100),
+  billRate: z.number().min(0).max(10_000),
+  costRate: z.number().min(0).max(10_000),
+});
+
+export const updateAssignmentSchema = z.object({
+  projectRole: z.string().min(1).max(100).optional(),
+  billRate: z.number().min(0).max(10_000).optional(),
+  costRate: z.number().min(0).max(10_000).optional(),
+});
+
+export const hoursBatchSchema = z.object({
+  updates: z
+    .array(
+      z.object({
+        assignmentId: z.string().uuid(),
+        projectWeek: z.number().int().min(0).max(520),
+        plannedHours: z.number().min(0).max(168).nullable().optional(),
+        actualHours: z.number().min(0).max(168).nullable().optional(),
+      })
+    )
+    .min(1, "At least one update required")
+    .max(500, "Batch too large (max 500 entries)"),
+});
+
+export const unlockWeekSchema = z.object({
+  reason: z.string().max(500).optional(),
+});

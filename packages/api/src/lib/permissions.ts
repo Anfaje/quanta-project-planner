@@ -172,3 +172,36 @@ export function roleRequiresContext(role: Role): string | null {
     default: return null;
   }
 }
+
+/**
+ * Check if a user can create a new project in the given (account, BU).
+ *
+ * Any of the following grants creation rights:
+ *   - AA: anywhere
+ *   - BUL: if owningBuId matches their primary BU
+ *   - AC:  if accountId is in their managed accounts
+ *   - PM:  anywhere (PM is a delivery role, not scoped to a BU or account)
+ *
+ * IC alone cannot create projects.
+ */
+export function canCreateProject(
+  user: AuthUser,
+  accountId: string,
+  owningBuId: string
+): boolean {
+  if (user.roles.includes(Role.AA)) return true;
+  if (user.roles.includes(Role.PM)) return true;
+  if (user.roles.includes(Role.BUL) && owningBuId === user.primaryBuId) return true;
+  if (user.roles.includes(Role.AC) && user.managedAccountIds.includes(accountId)) return true;
+  return false;
+}
+
+/**
+ * Check if a user can manage (edit/archive) a project.
+ *
+ * Requires a manage-capable role AND access to the project. The caller is
+ * expected to combine this with canAccessProject / ResourceContext as needed.
+ */
+export function canManageProject(user: AuthUser): boolean {
+  return hasCapability(user, "manageProject");
+}

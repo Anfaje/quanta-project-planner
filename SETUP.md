@@ -298,11 +298,60 @@ cd packages/api
 npx vitest run
 ```
 
-Should show 42 tests passing across 3 test suites:
+Should show 61 tests passing across 4 test suites:
 
 - **permissions.test.ts** — role combos, financial scoping, dashboard sections, hour editing
 - **serializer.test.ts** — field stripping per role per project context
 - **totp.test.ts** — encryption round-trip, code generation + verification
+- **financialCalc.test.ts** — assignment/project totals, burn series, EAC, week helpers (Drop 3)
+
+---
+
+## Drop 3 — Project API smoke test
+
+After login (see the Auth section above — this uses session cookies) the main
+project endpoints become available. A quick sanity run:
+
+```bash
+# List projects the caller can see (scoped by role)
+curl -b cookies.txt http://localhost:4000/api/projects
+
+# Detail
+curl -b cookies.txt http://localhost:4000/api/projects/<id>
+
+# Hours grid
+curl -b cookies.txt http://localhost:4000/api/projects/<id>/hours
+
+# Batch update hours
+curl -b cookies.txt -X PUT http://localhost:4000/api/projects/<id>/hours \
+  -H "Content-Type: application/json" \
+  -d '{"updates":[{"assignmentId":"<aid>","projectWeek":2,"actualHours":38}]}'
+
+# Lock week 2
+curl -b cookies.txt -X POST http://localhost:4000/api/projects/<id>/weeks/2/lock
+
+# Unlock with reason (PM/AC/BUL only)
+curl -b cookies.txt -X POST http://localhost:4000/api/projects/<id>/weeks/2/unlock \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"Correction: timesheet was filed late"}'
+
+# Fill remaining (copy planned→actual on non-locked, null cells)
+curl -b cookies.txt -X POST http://localhost:4000/api/projects/<id>/weeks/2/fill-remaining
+
+# Burn chart
+curl -b cookies.txt http://localhost:4000/api/projects/<id>/burn
+
+# Adaptive dashboard
+curl -b cookies.txt http://localhost:4000/api/dashboard
+
+# Exports (add -o file.csv / file.pdf to save)
+curl -b cookies.txt -o report.csv http://localhost:4000/api/projects/<id>/export.csv
+curl -b cookies.txt -o report.pdf http://localhost:4000/api/projects/<id>/export.pdf
+```
+
+All responses are scoped: an IC sees only their own hours row; a PM sees bill
+rates but no cost rates; AC/BUL/AA (with flag) see everything. The CSV/PDF
+column sets reflect these same rules.
 
 ---
 
