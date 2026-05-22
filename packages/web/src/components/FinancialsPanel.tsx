@@ -58,7 +58,7 @@ export function FinancialsPanel({ detail }: { detail: ProjectDetail }) {
           <Card>
             <CardHeader>
               <SectionTitle
-                title="Fee &amp; cost trajectory"
+                title="Fee & cost trajectory"
                 subtitle="Cumulative quoted fee vs actual cost by week"
               />
             </CardHeader>
@@ -392,7 +392,7 @@ function ResourceFinancialsTable({ detail }: { detail: ProjectDetail }) {
 function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div>
-      <h2 className="text-base font-semibold text-gray-900" dangerouslySetInnerHTML={{ __html: title }} />
+      <h2 className="text-base font-semibold text-gray-900">{title}</h2>
       {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
     </div>
   );

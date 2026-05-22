@@ -80,9 +80,12 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((o) => !o)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label={`User menu for ${me.name}`}
               className="flex items-center gap-2 pl-2 pr-3 py-1 rounded-full hover:bg-gray-100 transition-colors"
             >
-              <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-semibold">
+              <div aria-hidden="true" className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-semibold">
                 {initials || "?"}
               </div>
               <div className="text-left leading-tight hidden sm:block">
@@ -92,7 +95,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+              <div role="menu" className="absolute right-0 mt-2 w-64 bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100">
                   <div className="text-sm font-semibold text-gray-800">{me.name}</div>
                   <div className="text-xs text-gray-500">{me.email}</div>
@@ -114,6 +117,7 @@ export function Layout({ children }: { children: ReactNode }) {
                   </div>
                 </div>
                 <button
+                  role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
                     void logout().then(() => navigate("/login", { replace: true }));

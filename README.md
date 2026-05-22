@@ -147,8 +147,8 @@ quanta-project-planner/
 | 3 | Core API: projects, hours, assignments, dashboard, export | ✅ |
 | 4a | Frontend Phase A: shared infra, auth, dashboard, projects, hours | ✅ |
 | 4b | Frontend Phase B: wizard, admin console, financial drill-down | ✅ |
-| 6a | Frontend tests: vitest + RTL, 47 tests across utilities, auth, dashboard, hours grid, wizard | ✅ |
-| 6b | A11y + security review: focus traps, aria audit, code-defense sweep, SECURITY.md | 🔜 |
+| 6a | Frontend tests: vitest + RTL, 60 tests across utilities, auth, dashboard, hours grid, wizard, and shared UI primitives | ✅ |
+| 6b | A11y + security review: focus traps, aria audit, code-defense sweep, SECURITY.md | ✅ |
 | 6c | Perf + migration tooling: code-splitting, memoisation, import helpers | 🔜 |
 | 5  | Infrastructure: Terraform, CI/CD, deployment | — |
 
@@ -203,5 +203,21 @@ A11y bugs found and fixed along the way (pulled forward from Drop 6b):
 
 - `FormInput` and `FormTextarea` weren't `htmlFor`-associating their labels with their inputs — fixed with a small id-generation helper.
 - `ProjectWizardPage`'s bespoke `Field` component had the same issue — fixed using `React.useId` + `cloneElement` to inject an id into the labeled child.
-- `MfaVerifyPage` and `MfaSetupPage` both had near-duplicate strings between page description and error message ("Enter the 6-digit code from your authenticator app" appearing in both) — error message changed to "Code must be 6 digits" so screen readers no longer see two identical sentences. 
+- `MfaVerifyPage` and `MfaSetupPage` both had near-duplicate strings between page description and error message ("Enter the 6-digit code from your authenticator app" appearing in both) — error message changed to "Code must be 6 digits" so screen readers no longer see two identical sentences.
+
+### Drop 6b highlights (A11y + security review)
+
+The big-impact a11y and security issues are addressed. The codebase now has zero `dangerouslySetInnerHTML` usages, every modal traps focus and restores it on close, all forms wire `aria-invalid` and `aria-describedby` to their error/hint messages, and the tab navigation surfaces support full keyboard control:
+
+- **Removed XSS vector** — `FinancialsPanel`'s `SectionTitle` was rendering titles through `dangerouslySetInnerHTML` to display an `&amp;` entity. That entire pathway is gone; the title now renders as a plain text node. Real risk if user-controlled titles ever flowed in.
+- **Modal** — `role="dialog"` + `aria-modal="true"` + `aria-labelledby` pointing at the title; focus moves to the first focusable element on open and is restored to the opener on close; Tab and Shift+Tab cycle within the dialog; Escape closes; body scroll is locked while open.
+- **Form inputs** — `FormInput` / `FormTextarea` now use `useId` for stable, collision-free ids and expose `aria-invalid` when there's an error plus `aria-describedby` pointing at the rendered error or hint message. Screen-reader users now hear validation feedback when they focus a broken field.
+- **New shared `Tabs` / `TabPanel` primitives** with `role="tablist"` / `role="tab"` / `role="tabpanel"`, proper `aria-selected` and `aria-controls` wiring, and full keyboard navigation: Left/Right arrows wrap between tabs, Home/End jump to first/last, only the active tab is in the natural tab order. `ProjectDetailPage` and `AdminConsolePage` migrated to use them.
+- **Wizard step indicator** — rebuilt as a semantic `<ol>` with `aria-current="step"` on the active step and descriptive aria-labels like "Step 2 of 5: Resources (current)"; all decorative chrome marked `aria-hidden`.
+- **Live regions** — the hours-grid toast announcing save / lock results is now `aria-live="polite" aria-atomic="true"` so screen readers hear the outcome of mutations.
+- **Disclosure widgets** — the user-menu button and the `⋯` week-actions menu both expose `aria-haspopup="menu"` + `aria-expanded` reflecting open state, with the dropdowns using `role="menu"` / `role="menuitem"`.
+- **Decorative SVGs** — every icon-only SVG (close X, search empty-state, error chevron, logo glyph, wizard tick) is now `aria-hidden="true"` so AT users don't hear them announced.
+- **Disambiguated user-menu label** — was "Account menu for X", which collided with Quanta's domain concept of an Account. Now "User menu for X".
+- **`SECURITY.md`** — new top-level document covering reporting policy, threat model, defenses currently in place (auth, authorisation, input validation, transport, rate limiting, audit, XSS surface), and known gaps with rationale for each.
+- **+13 new a11y tests** in `ui.test.tsx` covering Modal labelling / Escape / focus restoration / Tab+Shift-Tab cycling, Tabs roles / keyboard nav / Home-End, and FormInput `aria-invalid` + `aria-describedby` wiring. Web suite total: 60 tests across 7 files.
 

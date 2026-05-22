@@ -13,6 +13,8 @@ import {
   Badge,
   Button,
   PageHeader,
+  TabPanel,
+  Tabs,
 } from "../components/ui";
 import {
   formatMoney,
@@ -128,27 +130,21 @@ export function ProjectDetailPage() {
       <SummaryMetrics data={data} />
 
       {/* ── Tabs ── */}
-      <div className="mt-6 border-b border-gray-200 flex gap-1">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === t.id
-                ? "border-indigo-600 text-indigo-700"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={TABS} active={tab} onChange={setTab} className="mt-6" />
 
       <div className="mt-6">
-        {tab === "overview" && <OverviewTab data={data} />}
-        {tab === "hours" && <HoursGridPanel projectId={p.id} />}
-        {tab === "burn" && <BurnChartPanel projectId={p.id} />}
-        {tab === "financials" && <FinancialsPanel detail={data} />}
+        <TabPanel id="overview" active={tab === "overview"}>
+          <OverviewTab data={data} />
+        </TabPanel>
+        <TabPanel id="hours" active={tab === "hours"}>
+          <HoursGridPanel projectId={p.id} />
+        </TabPanel>
+        <TabPanel id="burn" active={tab === "burn"}>
+          <BurnChartPanel projectId={p.id} />
+        </TabPanel>
+        <TabPanel id="financials" active={tab === "financials"}>
+          <FinancialsPanel detail={data} />
+        </TabPanel>
       </div>
     </Layout>
   );

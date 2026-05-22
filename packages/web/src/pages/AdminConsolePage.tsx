@@ -20,6 +20,8 @@ import {
   Modal,
   PageHeader,
   Spinner,
+  TabPanel,
+  Tabs,
 } from "../components/ui";
 import { formatDate, formatRelative, roleLabel } from "../lib/format";
 
@@ -60,26 +62,20 @@ export function AdminConsolePage() {
         subtitle="Manage users, business units, accounts, and authentication settings."
       />
 
-      <div className="border-b border-gray-200 flex gap-1 mb-6">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setActiveTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === t.id
-                ? "border-indigo-600 text-indigo-700"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-6" />
 
-      {activeTab === "users" && <UsersTab canEditAll={isAA} />}
-      {activeTab === "bus" && <BusinessUnitsTab canWrite={isAA} />}
-      {activeTab === "accounts" && <AccountsTab />}
-      {activeTab === "domains" && <DomainsTab />}
+      <TabPanel id="users" active={activeTab === "users"}>
+        <UsersTab canEditAll={isAA} />
+      </TabPanel>
+      <TabPanel id="bus" active={activeTab === "bus"}>
+        <BusinessUnitsTab canWrite={isAA} />
+      </TabPanel>
+      <TabPanel id="accounts" active={activeTab === "accounts"}>
+        <AccountsTab />
+      </TabPanel>
+      <TabPanel id="domains" active={activeTab === "domains"}>
+        <DomainsTab />
+      </TabPanel>
     </Layout>
   );
 }

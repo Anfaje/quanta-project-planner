@@ -329,7 +329,7 @@ cd packages/web
 npm run test
 ```
 
-Should show 47 tests passing across 6 test suites:
+Should show 60 tests passing across 7 test suites:
 
 - **lib/format.test.ts** — money / hours / percent / date / status-color formatters (23 tests)
 - **lib/api.test.ts** — fetch wrapper happy + error paths, 204 handling, ApiError shape (7 tests)
@@ -337,6 +337,7 @@ Should show 47 tests passing across 6 test suites:
 - **pages/DashboardPage.test.tsx** — section iteration order, greeting, error alert (4 tests)
 - **components/HoursGridPanel.test.tsx** — grid render, inline-edit batching, PUT shape on Save, POST on Lock (4 tests)
 - **pages/ProjectWizardPage.test.tsx** — step validation gating, navigation, resource picker, end-to-end submit payload (4 tests)
+- **components/ui.test.tsx** — Modal focus trap + Escape + restoration, Tabs ARIA + keyboard navigation, FormInput aria-invalid + aria-describedby wiring (13 tests, added in Drop 6b)
 
 Use `npm run test:watch` from `packages/web/` to run tests in watch mode while iterating on UI code.
 

@@ -310,19 +310,25 @@ function StepIndicator({
   valid: (step: number) => boolean;
 }) {
   return (
-    <div className="flex items-center gap-1 mb-8">
+    <ol
+      aria-label="Project creation steps"
+      className="flex items-center gap-1 mb-8 list-none p-0"
+    >
       {STEPS.map((step, i) => {
         const num = step.id;
         const isActive = num === current;
         const isDone = num < current;
         // Can revisit completed steps; can't jump forward.
         const clickable = num < current || (num === current + 1 && valid(current));
+        const status = isDone ? "completed" : isActive ? "current" : "upcoming";
         return (
-          <div key={step.id} className="flex items-center flex-1">
+          <li key={step.id} className="flex items-center flex-1">
             <button
               onClick={() => clickable && onStepClick(num)}
               disabled={!clickable}
-              className={`flex items-center gap-2 w-full py-2 px-3 rounded-lg transition-all ${
+              aria-current={isActive ? "step" : undefined}
+              aria-label={`Step ${num} of ${STEPS.length}: ${step.label} (${status})`}
+              className={`flex items-center gap-2 w-full py-2 px-3 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-indigo-200 ${
                 isActive
                   ? "bg-indigo-50 border border-indigo-200"
                   : isDone
@@ -331,6 +337,7 @@ function StepIndicator({
               }`}
             >
               <div
+                aria-hidden="true"
                 className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                   isActive
                     ? "bg-indigo-600 text-white"
@@ -340,7 +347,7 @@ function StepIndicator({
                 }`}
               >
                 {isDone ? (
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 ) : (
@@ -348,6 +355,7 @@ function StepIndicator({
                 )}
               </div>
               <div
+                aria-hidden="true"
                 className={`text-xs font-semibold truncate ${
                   isActive ? "text-indigo-700" : isDone ? "text-emerald-700" : "text-gray-400"
                 }`}
@@ -356,12 +364,12 @@ function StepIndicator({
               </div>
             </button>
             {i < STEPS.length - 1 && (
-              <div className={`w-4 h-px flex-shrink-0 mx-1 ${isDone ? "bg-emerald-300" : "bg-gray-200"}`} />
+              <div aria-hidden="true" className={`w-4 h-px flex-shrink-0 mx-1 ${isDone ? "bg-emerald-300" : "bg-gray-200"}`} />
             )}
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }
 

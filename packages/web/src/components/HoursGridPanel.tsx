@@ -170,7 +170,7 @@ export function HoursGridPanel({ projectId }: Props) {
       </div>
 
       {toast && (
-        <div className="mb-3">
+        <div className="mb-3" aria-live="polite" aria-atomic="true">
           <Alert tone={toast.tone}>{toast.text}</Alert>
         </div>
       )}
@@ -393,6 +393,7 @@ function EditableValue({
 // ═══════════════════════════════════════════════════════════════
 
 function WeekActionsMenu({
+  week,
   canFill,
   onLock,
   onFill,
@@ -407,17 +408,22 @@ function WeekActionsMenu({
     <div className="relative inline-block">
       <button
         onClick={() => setOpen((o) => !o)}
+        aria-label={`Actions for week ${week + 1}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
         className="text-[10px] text-gray-400 hover:text-indigo-600 font-medium mt-1"
       >
         ⋯
       </button>
       {open && (
         <div
+          role="menu"
           className="absolute top-full right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 min-w-[140px]"
           onMouseLeave={() => setOpen(false)}
         >
           {canFill && (
             <button
+              role="menuitem"
               onClick={() => {
                 setOpen(false);
                 onFill();
@@ -428,6 +434,7 @@ function WeekActionsMenu({
             </button>
           )}
           <button
+            role="menuitem"
             onClick={() => {
               setOpen(false);
               onLock();

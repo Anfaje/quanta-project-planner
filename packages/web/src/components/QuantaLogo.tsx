@@ -17,9 +17,10 @@ export function QuantaLogo({ size = "md", withWordmark = true }: Props) {
     size === "lg" ? "text-3xl" : size === "md" ? "text-xl" : "text-base";
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" role={withWordmark ? undefined : "img"} aria-label={withWordmark ? undefined : "Quanta"}>
       <div className={`${box} bg-indigo-600 rounded-lg flex items-center justify-center`}>
         <svg
+          aria-hidden="true"
           className={`${icon} text-white`}
           fill="none"
           viewBox="0 0 24 24"

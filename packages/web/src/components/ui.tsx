@@ -6,7 +6,16 @@
  * the prototypes get by with native HTML + our own styling.
  */
 
-import { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, TextareaHTMLAttributes } from "react";
+import {
+  ReactNode,
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  TextareaHTMLAttributes,
+  KeyboardEvent as ReactKeyboardEvent,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 
 // ── Button ──
 
@@ -50,14 +59,24 @@ export function Button({
 export function Spinner({
   size = "sm",
   color = "gray",
+  label,
 }: {
   size?: "xs" | "sm" | "md" | "lg";
   color?: "gray" | "white" | "indigo";
+  /** Optional accessible label; when omitted the spinner is decorative. */
+  label?: string;
 }) {
   const s = { xs: "w-3 h-3", sm: "w-4 h-4", md: "w-6 h-6", lg: "w-10 h-10" }[size];
   const c = { gray: "text-gray-400", white: "text-white", indigo: "text-indigo-500" }[color];
   return (
-    <svg className={`${s} ${c} animate-spin`} fill="none" viewBox="0 0 24 24">
+    <svg
+      className={`${s} ${c} animate-spin`}
+      fill="none"
+      viewBox="0 0 24 24"
+      role={label ? "status" : "presentation"}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+    >
       <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="50" strokeDashoffset="25" />
     </svg>
   );
@@ -73,16 +92,13 @@ interface FormInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "on
   hint?: string;
 }
 
-// Stable per-render counter so generated input IDs don't collide when multiple
-// FormInputs render on the same page without an explicit id prop.
-let __inputIdCounter = 0;
-function nextInputId() {
-  __inputIdCounter += 1;
-  return `qfi-${__inputIdCounter}`;
-}
-
 export function FormInput({ label, value, onChange, error, hint, type = "text", id, ...rest }: FormInputProps) {
-  const inputId = id ?? (label ? nextInputId() : undefined);
+  // Generate one stable id per render; reuse it for the input + label
+  // association and for any hint/error elements we link via
+  // aria-describedby.
+  const reactId = useId();
+  const inputId = id ?? `fi-${reactId}`;
+  const messageId = error || hint ? `${inputId}-msg` : undefined;
   return (
     <div className="mb-4">
       {label && (
@@ -95,6 +111,8 @@ export function FormInput({ label, value, onChange, error, hint, type = "text", 
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={messageId}
         className={`w-full px-3 py-2.5 text-sm border rounded-lg outline-none transition-all ${
           error
             ? "border-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-50"
@@ -103,14 +121,18 @@ export function FormInput({ label, value, onChange, error, hint, type = "text", 
         {...rest}
       />
       {error && (
-        <div className="text-xs text-rose-500 mt-1 flex items-center gap-1">
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div id={messageId} className="text-xs text-rose-500 mt-1 flex items-center gap-1">
+          <svg aria-hidden="true" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01" />
           </svg>
           {error}
         </div>
       )}
-      {hint && !error && <div className="text-xs text-gray-400 mt-1">{hint}</div>}
+      {hint && !error && (
+        <div id={messageId} className="text-xs text-gray-400 mt-1">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -127,7 +149,9 @@ interface FormTextareaProps
 }
 
 export function FormTextarea({ label, value, onChange, error, hint, rows = 3, id, ...rest }: FormTextareaProps) {
-  const taId = id ?? (label ? nextInputId() : undefined);
+  const reactId = useId();
+  const taId = id ?? `fi-${reactId}`;
+  const messageId = error || hint ? `${taId}-msg` : undefined;
   return (
     <div className="mb-4">
       {label && (
@@ -140,6 +164,8 @@ export function FormTextarea({ label, value, onChange, error, hint, rows = 3, id
         value={value}
         rows={rows}
         onChange={(e) => onChange(e.target.value)}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={messageId}
         className={`w-full px-3 py-2.5 text-sm border rounded-lg outline-none transition-all ${
           error
             ? "border-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-50"
@@ -147,8 +173,16 @@ export function FormTextarea({ label, value, onChange, error, hint, rows = 3, id
         }`}
         {...rest}
       />
-      {error && <div className="text-xs text-rose-500 mt-1">{error}</div>}
-      {hint && !error && <div className="text-xs text-gray-400 mt-1">{hint}</div>}
+      {error && (
+        <div id={messageId} className="text-xs text-rose-500 mt-1">
+          {error}
+        </div>
+      )}
+      {hint && !error && (
+        <div id={messageId} className="text-xs text-gray-400 mt-1">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -244,7 +278,7 @@ export function EmptyState({
   return (
     <div className="text-center py-16 px-6">
       <div className="w-12 h-12 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-        <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <svg aria-hidden="true" className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
       </div>
@@ -280,9 +314,18 @@ export function PageHeader({
 // ── Modal ──
 
 /**
- * Minimal modal: centered panel over a dimmed backdrop, closed via backdrop
- * click or Escape. Not focus-trapped — good enough for Drop 4b, revisit in
- * Drop 6 for full a11y.
+ * Accessible modal dialog.
+ *
+ * - Wraps content in role="dialog" + aria-modal="true" so AT users hear it
+ *   announced as a modal.
+ * - On open: locks body scroll, captures the currently-focused element, and
+ *   moves focus to the first focusable element inside the dialog.
+ * - While open: Tab and Shift+Tab cycle within the dialog (focus trap).
+ * - Escape and backdrop click both close the dialog.
+ * - On close: restores focus to the element that was focused at open.
+ *
+ * Not animated and not nested-modal-safe — both are deferred until we have
+ * a use case. For the admin console workflows, this is sufficient.
  */
 export function Modal({
   open,
@@ -298,6 +341,64 @@ export function Modal({
   size?: "sm" | "md" | "lg";
 }) {
   const widthClass = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl" }[size];
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
+  // Lock body scroll while the modal is open, restore on unmount/close.
+  // This also prevents the page behind the backdrop from scrolling under
+  // the user's cursor.
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open]);
+
+  // Capture previously-focused element on open, restore on close.
+  useEffect(() => {
+    if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    // After paint, move focus to the first focusable element inside the dialog.
+    const focusables = getFocusables(dialogRef.current);
+    (focusables[0] ?? dialogRef.current)?.focus();
+    return () => {
+      previouslyFocused?.focus();
+    };
+  }, [open]);
+
+  // Trap focus: Tab and Shift+Tab cycle within the dialog. Also handle
+  // Escape here so users on assistive tech with the dialog focused still
+  // get a way out.
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusables = getFocusables(dialogRef.current);
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -305,23 +406,34 @@ export function Modal({
     <div
       className="fixed inset-0 z-50 bg-gray-900/40 flex items-start justify-center p-4 overflow-y-auto"
       onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
     >
       <div
-        className={`bg-white rounded-2xl border border-gray-100 shadow-2xl w-full ${widthClass} mt-[10vh] mb-8`}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        tabIndex={-1}
+        className={`bg-white rounded-2xl border border-gray-100 shadow-2xl w-full ${widthClass} mt-[10vh] mb-8 outline-none`}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+            <h2 id={titleId} className="text-base font-semibold text-gray-900">
+              {title}
+            </h2>
             <button
               onClick={onClose}
               className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-              aria-label="Close"
+              aria-label="Close dialog"
             >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                aria-hidden="true"
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -329,6 +441,135 @@ export function Modal({
         )}
         <div className="p-6">{children}</div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Returns focusable elements inside `root` in tab order. Excludes elements
+ * with negative tabIndex, disabled, or hidden via the standard `hidden`
+ * attribute. Good enough for our dialogs — not a full polyfill.
+ */
+function getFocusables(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return [];
+  const selector = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled]):not([type='hidden'])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ].join(",");
+  return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(
+    (el) => !el.hidden && el.offsetParent !== null
+  );
+}
+
+// ── Tabs ──
+
+/**
+ * Accessible tab list.
+ *
+ * - Renders role="tablist"; each tab is role="tab" with proper aria-selected
+ *   and aria-controls. Callers must put the corresponding panel inside a
+ *   <TabPanel> so aria-labelledby / aria-controls match up.
+ * - Keyboard: Left/Right arrows move between tabs; Home/End jump to ends.
+ *   Activation happens immediately on focus (manual activation is also fine
+ *   here because tab panels are cheap to switch).
+ *
+ * The visual style stays out of the primitive — pass a `renderTab` function
+ * if the surrounding page needs different chrome.
+ */
+
+export interface TabDef<Id extends string = string> {
+  id: Id;
+  label: string;
+}
+
+export function Tabs<Id extends string>({
+  tabs,
+  active,
+  onChange,
+  className = "",
+}: {
+  tabs: TabDef<Id>[];
+  active: Id;
+  onChange: (id: Id) => void;
+  className?: string;
+}) {
+  const refs = useRef<Map<Id, HTMLButtonElement>>(new Map());
+
+  const focusTab = (id: Id) => {
+    refs.current.get(id)?.focus();
+    onChange(id);
+  };
+
+  const onKeyDown = (e: ReactKeyboardEvent, idx: number) => {
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      focusTab(tabs[(idx + 1) % tabs.length].id);
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      focusTab(tabs[(idx - 1 + tabs.length) % tabs.length].id);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      focusTab(tabs[0].id);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      focusTab(tabs[tabs.length - 1].id);
+    }
+  };
+
+  return (
+    <div role="tablist" className={`border-b border-gray-200 flex gap-1 ${className}`}>
+      {tabs.map((t, idx) => {
+        const isActive = t.id === active;
+        return (
+          <button
+            key={t.id}
+            ref={(el) => {
+              if (el) refs.current.set(t.id, el);
+              else refs.current.delete(t.id);
+            }}
+            role="tab"
+            id={`tab-${t.id}`}
+            aria-selected={isActive}
+            aria-controls={`panel-${t.id}`}
+            tabIndex={isActive ? 0 : -1}
+            onClick={() => onChange(t.id)}
+            onKeyDown={(e) => onKeyDown(e, idx)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:ring-offset-1 rounded-t ${
+              isActive
+                ? "border-indigo-600 text-indigo-700"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Panel companion to <Tabs>. Sets role="tabpanel" + correct aria-labelledby/id. */
+export function TabPanel({
+  id,
+  active,
+  children,
+}: {
+  id: string;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      role="tabpanel"
+      id={`panel-${id}`}
+      aria-labelledby={`tab-${id}`}
+      hidden={!active}
+    >
+      {active && children}
     </div>
   );
 }
