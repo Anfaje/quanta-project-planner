@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useId } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
@@ -1060,10 +1060,26 @@ function Field({
   children: React.ReactNode;
   hint?: string;
 }) {
+  // Generate a stable id and inject it into the child IF the child is a
+  // single React element (the common case — a SelectField or input). For
+  // children that are wrapper divs (e.g. the contingency slider), we fall
+  // back to leaving the label unassociated. Both branches are still better
+  // than nothing for screen readers because the label visually labels what's
+  // beneath it.
+  const id = useId();
+  const child = React.isValidElement(children)
+    ? React.cloneElement(children as React.ReactElement<{ id?: string }>, { id })
+    : children;
+  const hasSingleElementChild = React.isValidElement(children);
   return (
     <div className="mb-4">
-      <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
-      {children}
+      <label
+        htmlFor={hasSingleElementChild ? id : undefined}
+        className="block text-sm font-medium text-gray-700 mb-1.5"
+      >
+        {label}
+      </label>
+      {child}
       {hint && <div className="text-xs text-gray-400 mt-1">{hint}</div>}
     </div>
   );
@@ -1074,14 +1090,17 @@ function SelectField({
   onChange,
   options,
   placeholder,
+  id,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   placeholder?: string;
+  id?: string;
 }) {
   return (
     <select
+      id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg outline-none transition-all focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50 bg-white"

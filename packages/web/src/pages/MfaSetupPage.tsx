@@ -56,7 +56,7 @@ export function MfaSetupPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (code.length !== 6) {
-      setError("Enter the 6-digit code from your authenticator app");
+      setError("Code must be 6 digits");
       return;
     }
     setError(null);

@@ -73,11 +73,25 @@ interface FormInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "on
   hint?: string;
 }
 
-export function FormInput({ label, value, onChange, error, hint, type = "text", ...rest }: FormInputProps) {
+// Stable per-render counter so generated input IDs don't collide when multiple
+// FormInputs render on the same page without an explicit id prop.
+let __inputIdCounter = 0;
+function nextInputId() {
+  __inputIdCounter += 1;
+  return `qfi-${__inputIdCounter}`;
+}
+
+export function FormInput({ label, value, onChange, error, hint, type = "text", id, ...rest }: FormInputProps) {
+  const inputId = id ?? (label ? nextInputId() : undefined);
   return (
     <div className="mb-4">
-      {label && <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>}
+      {label && (
+        <label htmlFor={inputId} className="block text-sm font-medium text-gray-700 mb-1.5">
+          {label}
+        </label>
+      )}
       <input
+        id={inputId}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -112,11 +126,17 @@ interface FormTextareaProps
   hint?: string;
 }
 
-export function FormTextarea({ label, value, onChange, error, hint, rows = 3, ...rest }: FormTextareaProps) {
+export function FormTextarea({ label, value, onChange, error, hint, rows = 3, id, ...rest }: FormTextareaProps) {
+  const taId = id ?? (label ? nextInputId() : undefined);
   return (
     <div className="mb-4">
-      {label && <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>}
+      {label && (
+        <label htmlFor={taId} className="block text-sm font-medium text-gray-700 mb-1.5">
+          {label}
+        </label>
+      )}
       <textarea
+        id={taId}
         value={value}
         rows={rows}
         onChange={(e) => onChange(e.target.value)}

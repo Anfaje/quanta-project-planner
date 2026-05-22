@@ -147,8 +147,10 @@ quanta-project-planner/
 | 3 | Core API: projects, hours, assignments, dashboard, export | ✅ |
 | 4a | Frontend Phase A: shared infra, auth, dashboard, projects, hours | ✅ |
 | 4b | Frontend Phase B: wizard, admin console, financial drill-down | ✅ |
-| 5 | Infrastructure: Terraform, CI/CD, deployment | — |
-| 6 | Polish: WCAG, perf, pen test, migration | — |
+| 6a | Frontend tests: vitest + RTL, 47 tests across utilities, auth, dashboard, hours grid, wizard | ✅ |
+| 6b | A11y + security review: focus traps, aria audit, code-defense sweep, SECURITY.md | 🔜 |
+| 6c | Perf + migration tooling: code-splitting, memoisation, import helpers | 🔜 |
+| 5  | Infrastructure: Terraform, CI/CD, deployment | — |
 
 ### Drop 3 highlights
 
@@ -185,4 +187,21 @@ The management surfaces are now wired up end-to-end. A BUL can onboard people th
 - **Admin console** (`/admin`) — tabbed console visible to BUL and AA. Users tab shows name, roles, BU, managed accounts, project count, and active status with inline deactivate / reactivate, a detail modal for editing roles / BU / financial access / managed accounts (AC role), and an invite modal that returns the generated accept URL until SMTP lands. Business units tab lists code / name / BUL / counts with create + activate / deactivate. Accounts tab mirrors that for clients. Domains tab inline-adds domains with live user count per whitelisted domain and a remove action.
 - **Financials tab** on project detail — renders four headline metrics (quoted fee, fee burned, cost burned, margin with delta vs plan), a cumulative fee-vs-cost line chart with both planned and actual streams, a cost-by-resource donut with a legend, and a per-resource table of planned / actual fee / cost with margin badges. Falls back to a "Financials not visible" empty state for IC viewers.
 - **Navigation** — Admin link appears in the top nav for BUL / AA only; mirror of the server-side tab visibility.
+
+### Drop 6a highlights (Frontend tests)
+
+The web package now has its own test suite, matching the rigor of the 61 API tests already in place. 47 tests across six files cover the critical paths:
+
+- **Test infrastructure** — `vitest` + `@testing-library/react` + `@testing-library/user-event` + `happy-dom`. `vite.config.ts` is extended with a `test` block, a global setup file imports jest-dom matchers and registers RTL `cleanup`, and a `renderWithProviders` helper wraps in a fresh `QueryClient` + `MemoryRouter` (with optional `path`/`route` for parameterised pages) plus pre-seeded test users for IC / PM / AA.
+- **Utility tests** — `format.test.ts` (23 tests) pins down money / hours / percent / date / status-color contracts; `api.test.ts` (7 tests) exercises the fetch wrapper through happy paths, JSON error parsing, 204 responses, fall-back to "HTTP N" when the body has no `error` field, and non-JSON content.
+- **Auth flow** — `LoginPage.test.tsx` (5 tests) covers the mfa_required vs mfa_setup_required branches, error display, the input that strips non-digits and caps at 6 characters, and the sub-6-digit submission guard.
+- **Dashboard** — `DashboardPage.test.tsx` (4 tests) asserts the greeting renders the IC's first name, my_hours rows show project name + week number, the page preserves API-chosen section order (rendering Platform before BU health even when both apply), and a rejected query surfaces the error alert.
+- **Hours grid** — `HoursGridPanel.test.tsx` (4 tests) covers the rendered grid shape (one row per assignment, one column per week), inline-edit batching (typing into a cell increments the pending counter and shows the Discard button), the PUT payload shape when Save fires, and the POST to `/weeks/:week/lock` when Lock is clicked.
+- **Project wizard** — `ProjectWizardPage.test.tsx` (4 tests) covers Continue gating until basics validates, navigating Continue / Back across step 1 ↔ step 2, adding a resource from the directory updating the team count, and an end-to-end run that posts the expected payload shape and navigates to the new project on success.
+
+A11y bugs found and fixed along the way (pulled forward from Drop 6b):
+
+- `FormInput` and `FormTextarea` weren't `htmlFor`-associating their labels with their inputs — fixed with a small id-generation helper.
+- `ProjectWizardPage`'s bespoke `Field` component had the same issue — fixed using `React.useId` + `cloneElement` to inject an id into the labeled child.
+- `MfaVerifyPage` and `MfaSetupPage` both had near-duplicate strings between page description and error message ("Enter the 6-digit code from your authenticator app" appearing in both) — error message changed to "Code must be 6 digits" so screen readers no longer see two identical sentences. 
 
