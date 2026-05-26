@@ -16,6 +16,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmModal,
   FormInput,
   Modal,
   PageHeader,
@@ -833,8 +834,14 @@ function DomainsTab() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/api/admin/domains/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "domains"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "domains"] });
+      setPendingDelete(null);
+    },
   });
+
+  // Domain currently queued for deletion confirmation.
+  const [pendingDelete, setPendingDelete] = useState<AdminDomain | null>(null);
 
   return (
     <div>
@@ -908,15 +915,7 @@ function DomainsTab() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Remove ${d.domain}? Existing users won't be affected but new signups from this domain will be blocked.`
-                            )
-                          ) {
-                            deleteMutation.mutate(d.id);
-                          }
-                        }}
+                        onClick={() => setPendingDelete(d)}
                       >
                         Remove
                       </Button>
@@ -928,6 +927,26 @@ function DomainsTab() {
           </div>
         </Card>
       )}
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        title="Remove whitelisted domain?"
+        message={
+          pendingDelete ? (
+            <>
+              Remove <strong>{pendingDelete.domain}</strong>? Existing users won&apos;t be
+              affected but new signups from this domain will be blocked.
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Remove"
+        tone="danger"
+        loading={deleteMutation.isPending}
+        onConfirm={() => pendingDelete && deleteMutation.mutate(pendingDelete.id)}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

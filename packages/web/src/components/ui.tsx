@@ -12,9 +12,11 @@ import {
   InputHTMLAttributes,
   TextareaHTMLAttributes,
   KeyboardEvent as ReactKeyboardEvent,
+  forwardRef,
   useEffect,
   useId,
   useRef,
+  useState,
 } from "react";
 
 // ── Button ──
@@ -27,15 +29,10 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: "sm" | "md";
 }
 
-export function Button({
-  variant = "primary",
-  loading,
-  size = "md",
-  className = "",
-  children,
-  disabled,
-  ...rest
-}: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "primary", loading, size = "md", className = "", children, disabled, ...rest },
+  ref
+) {
   const base =
     "inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
   const sz = size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm";
@@ -47,12 +44,17 @@ export function Button({
   }[variant];
 
   return (
-    <button className={`${base} ${sz} ${styles} ${className}`} disabled={disabled || loading} {...rest}>
+    <button
+      ref={ref}
+      className={`${base} ${sz} ${styles} ${className}`}
+      disabled={disabled || loading}
+      {...rest}
+    >
       {loading && <Spinner size="xs" color={variant === "primary" || variant === "danger" ? "white" : "gray"} />}
       {children}
     </button>
   );
-}
+});
 
 // ── Spinner ──
 
@@ -573,3 +575,154 @@ export function TabPanel({
     </div>
   );
 }
+
+// ── ConfirmModal ──
+
+/**
+ * Yes/no confirmation dialog. Replaces window.confirm(), which is
+ * synchronous, blocks the event loop, can't be styled, and can't be made
+ * keyboard-accessible the way we want.
+ *
+ * Renders inside Modal so it inherits the focus trap, Escape-to-close,
+ * scroll lock, and aria-labelledby wiring for free. The Confirm button
+ * receives focus on open so Enter triggers the destructive action — but
+ * Escape still cancels.
+ *
+ * `tone="danger"` colours the confirm button rose; otherwise indigo.
+ */
+export function ConfirmModal({
+  open,
+  title,
+  message,
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  tone = "primary",
+  onConfirm,
+  onCancel,
+  loading = false,
+}: {
+  open: boolean;
+  title: string;
+  message: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  tone?: "primary" | "danger";
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading?: boolean;
+}) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  // Focus the confirm button after the Modal's own focus management runs.
+  // The Modal moves focus to the first focusable element on open; for a
+  // confirm dialog we want focus on the action, not the close X.
+  useEffect(() => {
+    if (!open) return;
+    // Small timeout so Modal's own focus assignment happens first.
+    const t = setTimeout(() => confirmRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, [open]);
+
+  return (
+    <Modal open={open} onClose={onCancel} title={title} size="sm">
+      <div className="text-sm text-gray-700 mb-6">{message}</div>
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" onClick={onCancel} disabled={loading}>
+          {cancelLabel}
+        </Button>
+        <Button
+          ref={confirmRef}
+          variant={tone === "danger" ? "danger" : "primary"}
+          onClick={onConfirm}
+          loading={loading}
+        >
+          {confirmLabel}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── PromptModal ──
+
+/**
+ * Single-line text-input prompt dialog. Replaces window.prompt(). The
+ * pattern is the same as ConfirmModal: it composes Modal so it gets focus
+ * trap / Escape / scroll lock automatically.
+ *
+ * Returns the entered value to onSubmit; an empty string still counts as
+ * a submission so callers can decide how to treat empties.
+ */
+export function PromptModal({
+  open,
+  title,
+  message,
+  placeholder,
+  initialValue = "",
+  submitLabel = "Submit",
+  cancelLabel = "Cancel",
+  onSubmit,
+  onCancel,
+  loading = false,
+  inputType = "text",
+  inputMode,
+  validator,
+}: {
+  open: boolean;
+  title: string;
+  message?: ReactNode;
+  placeholder?: string;
+  initialValue?: string;
+  submitLabel?: string;
+  cancelLabel?: string;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+  loading?: boolean;
+  inputType?: "text" | "number";
+  inputMode?: "text" | "decimal" | "numeric";
+  /** Returns a string error message to display, or null when valid. */
+  validator?: (value: string) => string | null;
+}) {
+  const [value, setValue] = useState(initialValue);
+
+  // Reset the field whenever the modal reopens; otherwise the previous
+  // submission's text would persist into the next invocation.
+  useEffect(() => {
+    if (open) setValue(initialValue);
+  }, [open, initialValue]);
+
+  const error = validator ? validator(value) : null;
+
+  return (
+    <Modal open={open} onClose={onCancel} title={title} size="sm">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (error) return;
+          onSubmit(value);
+        }}
+      >
+        {message && <div className="text-sm text-gray-700 mb-4">{message}</div>}
+        <FormInput
+          label=""
+          value={value}
+          onChange={setValue}
+          placeholder={placeholder}
+          autoFocus
+          type={inputType}
+          inputMode={inputMode}
+          error={value.length > 0 ? error ?? undefined : undefined}
+        />
+        <div className="flex justify-end gap-2 mt-2">
+          <Button variant="secondary" type="button" onClick={onCancel} disabled={loading}>
+            {cancelLabel}
+          </Button>
+          <Button type="submit" loading={loading} disabled={!!error}>
+            {submitLabel}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+

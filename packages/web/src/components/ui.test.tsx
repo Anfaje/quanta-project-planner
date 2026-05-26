@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Modal, Tabs, TabPanel, FormInput, Button } from "./ui";
+import { Modal, Tabs, TabPanel, FormInput, Button, ConfirmModal, PromptModal } from "./ui";
 import { renderWithProviders } from "../test/render";
 
 /**
@@ -221,5 +221,176 @@ describe("FormInput a11y wiring", () => {
 
     const describedBy = input.getAttribute("aria-describedby");
     expect(document.getElementById(describedBy!)?.textContent).toContain("At least 12 chars");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ConfirmModal
+// ═══════════════════════════════════════════════════════════════
+
+describe("ConfirmModal", () => {
+  it("renders message and both action buttons", () => {
+    renderWithProviders(
+      <ConfirmModal
+        open
+        title="Delete domain?"
+        message="This will block new signups from spantree.com."
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(/block new signups/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("calls onConfirm exactly once when the confirm button is clicked", async () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    renderWithProviders(
+      <ConfirmModal
+        open
+        title="Confirm"
+        message="Are you sure?"
+        confirmLabel="Yes, do it"
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes, do it" }));
+
+    expect(onConfirm).toHaveBeenCalledOnce();
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("danger tone renders the rose-coloured confirm button", () => {
+    renderWithProviders(
+      <ConfirmModal
+        open
+        title="Delete"
+        message="Forever"
+        tone="danger"
+        confirmLabel="Delete"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    );
+
+    // Tone "danger" maps to the rose-600 class in Button. We don't assert
+    // every class but verify one telltale rose- prefix is present.
+    const btn = screen.getByRole("button", { name: "Delete" });
+    expect(btn.className).toMatch(/rose-/);
+  });
+
+  it("Escape on the dialog triggers onCancel (delegated through Modal)", async () => {
+    const onCancel = vi.fn();
+    renderWithProviders(
+      <ConfirmModal
+        open
+        title="Confirm"
+        message="Q"
+        onConfirm={() => {}}
+        onCancel={onCancel}
+      />
+    );
+
+    await userEvent.keyboard("{Escape}");
+    expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PromptModal
+// ═══════════════════════════════════════════════════════════════
+
+describe("PromptModal", () => {
+  it("submits the entered value", async () => {
+    const onSubmit = vi.fn();
+    renderWithProviders(
+      <PromptModal
+        open
+        title="Unlock week"
+        message="Why?"
+        submitLabel="Unlock"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />
+    );
+
+    const input = screen.getByRole("textbox");
+    await userEvent.type(input, "client requested late timesheet");
+    await userEvent.click(screen.getByRole("button", { name: "Unlock" }));
+
+    expect(onSubmit).toHaveBeenCalledWith("client requested late timesheet");
+  });
+
+  it("respects initialValue and resets on reopen", async () => {
+    const { rerender } = renderWithProviders(
+      <PromptModal
+        open={false}
+        title="X"
+        initialValue="default"
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />
+    );
+
+    rerender(
+      <PromptModal
+        open={true}
+        title="X"
+        initialValue="default"
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />
+    );
+
+    const input = (await screen.findByRole("textbox")) as HTMLInputElement;
+    expect(input.value).toBe("default");
+  });
+
+  it("disables submit while validator returns a non-null error", async () => {
+    renderWithProviders(
+      <PromptModal
+        open
+        title="Hours per week"
+        validator={(v) => {
+          if (v === "") return null;
+          const n = Number(v);
+          return n >= 0 && n <= 168 ? null : "0-168 only";
+        }}
+        submitLabel="Apply"
+        onSubmit={() => {}}
+        onCancel={() => {}}
+      />
+    );
+
+    const input = screen.getByRole("textbox");
+    await userEvent.type(input, "999");
+
+    const submit = screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(screen.getByText("0-168 only")).toBeInTheDocument();
+  });
+
+  it("cancel does not invoke onSubmit", async () => {
+    const onSubmit = vi.fn();
+    const onCancel = vi.fn();
+    renderWithProviders(
+      <PromptModal
+        open
+        title="X"
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

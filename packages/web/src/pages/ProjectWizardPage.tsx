@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useId } from "react";
+import React, { useState, useEffect, useId, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
@@ -18,6 +18,7 @@ import {
   FormInput,
   FormTextarea,
   PageHeader,
+  PromptModal,
   Spinner,
 } from "../components/ui";
 import { formatDate, formatHours, formatMoney, formatPercent } from "../lib/format";
@@ -726,6 +727,10 @@ function Step3Hours({
   totalWeeks: number;
 }) {
   const weeks = Array.from({ length: totalWeeks }, (_, i) => i);
+  // Which resource is currently being prompted for a spread-evenly value.
+  // Holds the resource's draft (not just the id) so the modal can show
+  // their name in the title.
+  const [spreadTarget, setSpreadTarget] = useState<ResourceDraft | null>(null);
 
   const setCell = (userId: string, week: number, value: number) => {
     const key = `${userId}|${week}`;
@@ -735,13 +740,20 @@ function Step3Hours({
     setState({ ...state, plannedHours: next });
   };
 
-  const rowTotal = (userId: string): number => {
-    let sum = 0;
-    for (let w = 0; w < totalWeeks; w++) {
-      sum += state.plannedHours.get(`${userId}|${w}`) ?? 0;
+  // Pre-compute per-resource totals once per plannedHours change.
+  // Without this, every keystroke (each setCell) reruns rowTotal for every
+  // resource, which scales as O(resources × weeks). The Map iteration here
+  // is O(non-empty cells) which is much smaller.
+  const rowTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const [key, hours] of state.plannedHours) {
+      const userId = key.split("|")[0];
+      totals.set(userId, (totals.get(userId) ?? 0) + hours);
     }
-    return sum;
-  };
+    return totals;
+  }, [state.plannedHours]);
+
+  const rowTotal = (userId: string): number => rowTotals.get(userId) ?? 0;
 
   const fillWeeklyForResource = (userId: string, hoursPerWeek: number) => {
     const next = new Map(state.plannedHours);
@@ -797,13 +809,7 @@ function Step3Hours({
                   <div className="text-sm font-medium text-gray-900">{r.name}</div>
                   <div className="text-[10px] text-gray-400">{r.projectRole}</div>
                   <button
-                    onClick={() => {
-                      const v = window.prompt(`Hours per week for ${r.name}:`, "20");
-                      if (v === null) return;
-                      const n = Number(v);
-                      if (Number.isFinite(n) && n >= 0 && n <= 168)
-                        fillWeeklyForResource(r.userId, n);
-                    }}
+                    onClick={() => setSpreadTarget(r)}
                     className="text-[10px] text-indigo-500 hover:text-indigo-700 font-medium mt-1"
                   >
                     ⚡ Spread evenly
@@ -838,6 +844,30 @@ function Step3Hours({
           </tbody>
         </table>
       </div>
+      <PromptModal
+        open={spreadTarget !== null}
+        title={spreadTarget ? `Hours per week for ${spreadTarget.name}` : ""}
+        message="This value will be applied to every week, overwriting any existing planned hours for this resource."
+        placeholder="20"
+        initialValue="20"
+        submitLabel="Apply to all weeks"
+        inputType="number"
+        inputMode="decimal"
+        validator={(v) => {
+          if (v === "") return null;
+          const n = Number(v);
+          if (!Number.isFinite(n) || n < 0 || n > 168) return "Enter a number between 0 and 168";
+          return null;
+        }}
+        onCancel={() => setSpreadTarget(null)}
+        onSubmit={(v) => {
+          const n = Number(v);
+          if (Number.isFinite(n) && n >= 0 && n <= 168 && spreadTarget) {
+            fillWeeklyForResource(spreadTarget.userId, n);
+          }
+          setSpreadTarget(null);
+        }}
+      />
     </Card>
   );
 }
@@ -853,25 +883,35 @@ function Step4Financials({
   state: WizardState;
   totalWeeks: number;
 }) {
-  // Compute summary — same shape as API's financialCalc.ts sums.
-  const perResource = state.resources.map((r) => {
-    let hours = 0;
-    for (let w = 0; w < totalWeeks; w++) {
-      hours += state.plannedHours.get(`${r.userId}|${w}`) ?? 0;
-    }
+  // Memoize per-resource summaries and grand totals. They depend only on
+  // the wizard's resource roster, contingency, and plannedHours map — so
+  // navigating between steps or re-rendering for unrelated reasons no
+  // longer re-runs this loop.
+  const { perResource, totalHours, totalFee, totalCost, contingencyAmt, margin } = useMemo(() => {
+    const pr = state.resources.map((r) => {
+      let hours = 0;
+      for (let w = 0; w < totalWeeks; w++) {
+        hours += state.plannedHours.get(`${r.userId}|${w}`) ?? 0;
+      }
+      return {
+        ...r,
+        plannedHours: hours,
+        plannedFee: hours * r.billRate,
+        plannedCost: hours * r.costRate,
+      };
+    });
+    const th = pr.reduce((s, r) => s + r.plannedHours, 0);
+    const tf = pr.reduce((s, r) => s + r.plannedFee, 0);
+    const tc = pr.reduce((s, r) => s + r.plannedCost, 0);
     return {
-      ...r,
-      plannedHours: hours,
-      plannedFee: hours * r.billRate,
-      plannedCost: hours * r.costRate,
+      perResource: pr,
+      totalHours: th,
+      totalFee: tf,
+      totalCost: tc,
+      contingencyAmt: tf * state.contingencyPct,
+      margin: tf > 0 ? ((tf - tc) / tf) * 100 : 0,
     };
-  });
-
-  const totalHours = perResource.reduce((s, r) => s + r.plannedHours, 0);
-  const totalFee = perResource.reduce((s, r) => s + r.plannedFee, 0);
-  const totalCost = perResource.reduce((s, r) => s + r.plannedCost, 0);
-  const contingencyAmt = totalFee * state.contingencyPct;
-  const margin = totalFee > 0 ? ((totalFee - totalCost) / totalFee) * 100 : 0;
+  }, [state.resources, state.plannedHours, state.contingencyPct, totalWeeks]);
 
   return (
     <Card>

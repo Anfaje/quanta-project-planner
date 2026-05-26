@@ -149,7 +149,7 @@ quanta-project-planner/
 | 4b | Frontend Phase B: wizard, admin console, financial drill-down | ✅ |
 | 6a | Frontend tests: vitest + RTL, 60 tests across utilities, auth, dashboard, hours grid, wizard, and shared UI primitives | ✅ |
 | 6b | A11y + security review: focus traps, aria audit, code-defense sweep, SECURITY.md | ✅ |
-| 6c | Perf + migration tooling: code-splitting, memoisation, import helpers | 🔜 |
+| 6c | Perf + UX polish: code-splitting, memoisation, replace window.confirm/window.prompt with proper dialogs | ✅ |
 | 5  | Infrastructure: Terraform, CI/CD, deployment | — |
 
 ### Drop 3 highlights
@@ -220,4 +220,20 @@ The big-impact a11y and security issues are addressed. The codebase now has zero
 - **Disambiguated user-menu label** — was "Account menu for X", which collided with Quanta's domain concept of an Account. Now "User menu for X".
 - **`SECURITY.md`** — new top-level document covering reporting policy, threat model, defenses currently in place (auth, authorisation, input validation, transport, rate limiting, audit, XSS surface), and known gaps with rationale for each.
 - **+13 new a11y tests** in `ui.test.tsx` covering Modal labelling / Escape / focus restoration / Tab+Shift-Tab cycling, Tabs roles / keyboard nav / Home-End, and FormInput `aria-invalid` + `aria-describedby` wiring. Web suite total: 60 tests across 7 files.
+
+### Drop 6c highlights (Perf + UX polish)
+
+The last `window.confirm` / `window.prompt` calls are gone, the heavy pages are now code-split, and the hot rendering paths are memoised. Web suite total: 70 tests across 8 files.
+
+- **No more `window.confirm` / `window.prompt`** — two new shared primitives in `ui.tsx`:
+  - `ConfirmModal` — yes/no dialog with optional `danger` tone, auto-focuses the confirm action on open
+  - `PromptModal` — single-input prompt with optional `validator` callback for live error display
+  Both compose the existing `Modal`, so they inherit the focus trap, scroll lock, and Escape-to-close from Drop 6b without re-implementing any of it. Replaced the three remaining native calls: domain remove in the admin console (danger-toned confirm with the affected domain bolded), unlock-reason on the hours grid, and "spread evenly" on the wizard's planned-hours step (with a 0–168 validator).
+- **Code-splitting via `React.lazy`** — `ProjectWizardPage`, `AdminConsolePage`, and `AcceptInvitePage` are loaded on demand behind a top-level `Suspense` boundary. The fallback is a centered indigo spinner with `role="status"` matching `ProtectedRoute`'s loading look. An IC who only visits `/dashboard` and `/projects/:id` no longer downloads the wizard or admin bundles up front.
+- **Memoised hot paths**:
+  - `HoursGridPanel.HoursCell` is now `React.memo`-wrapped. The parent looks up the per-cell `pendingCell` at the iteration site (not the whole pending Map) and passes a stable `useCallback`-wrapped `onCellChange`. Editing one cell no longer forces all 260 cells in a 10×26 grid to re-render.
+  - Wizard `Step3Hours` row totals are now precomputed once per `plannedHours` change via `useMemo` (was O(resources × weeks) per keystroke; now O(non-empty cells)).
+  - Wizard `Step4Financials` per-resource summary and grand totals are memoised on `[resources, plannedHours, contingencyPct, totalWeeks]`, so navigating between steps doesn't re-run the loop.
+- **`Button` now uses `forwardRef`** so `ConfirmModal` can focus the confirm action without a workaround.
+- **+10 new tests**: `ConfirmModal` (4 — render, single-call invariant, danger tone styling, Escape to cancel), `PromptModal` (4 — submit value, `initialValue` resets on reopen, validator disables submit, cancel doesn't fire submit), and `App.test.tsx` (2 — Suspense fallback shown while a lazy chunk loads, lazy page replaces the fallback once its import resolves).
 

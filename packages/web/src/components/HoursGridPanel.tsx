@@ -1,8 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, memo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { HoursGrid, HoursEntry } from "../lib/types";
-import { Button, Spinner, Alert, Badge } from "./ui";
+import { Button, Spinner, Alert, Badge, PromptModal } from "./ui";
 import { formatHours, formatDate } from "../lib/format";
 
 /**
@@ -40,6 +40,27 @@ export function HoursGridPanel({ projectId }: Props) {
 
   const [pending, setPending] = useState<Map<string, PendingCell>>(new Map());
   const [toast, setToast] = useState<{ tone: "emerald" | "rose"; text: string } | null>(null);
+
+  // Stable cell-update callback so HoursCell can be memoized — without
+  // useCallback this closure would change every render, defeating React.memo
+  // for the entire grid.
+  const setPendingField = useCallback(
+    (
+      assignmentId: string,
+      week: number,
+      field: "plannedHours" | "actualHours",
+      value: number | null
+    ) => {
+      setPending((prev) => {
+        const key = `${assignmentId}|${week}`;
+        const next = new Map(prev);
+        const existing = next.get(key) ?? { assignmentId, projectWeek: week };
+        next.set(key, { ...existing, [field]: value });
+        return next;
+      });
+    },
+    []
+  );
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -233,6 +254,7 @@ export function HoursGridPanel({ projectId }: Props) {
                   </td>
                   {weeks.map((w) => {
                     const entry = a.entries.find((e) => e.week === w.week);
+                    const cellKey = `${a.id}|${w.week}`;
                     return (
                       <HoursCell
                         key={w.week}
@@ -242,8 +264,8 @@ export function HoursGridPanel({ projectId }: Props) {
                         locked={w.locked}
                         canEditPlanned={capabilities.canManagePlan && !w.locked}
                         canEditActual={canEditActualsForRow && !w.locked}
-                        pending={pending}
-                        setPending={setPending}
+                        pendingCell={pending.get(cellKey)}
+                        onCellChange={setPendingField}
                       />
                     );
                   })}
@@ -261,15 +283,22 @@ export function HoursGridPanel({ projectId }: Props) {
 // Cell — inline-editable planned + actual for one (assignment, week)
 // ═══════════════════════════════════════════════════════════════
 
-function HoursCell({
+/**
+ * Memoized so that, in a large grid, typing into one cell doesn't force
+ * every other cell to re-render. The parent passes only this cell's
+ * `pendingCell` (looked up by key) and a stable `onCellChange` callback —
+ * both are reference-equal when nothing about this cell changed, so the
+ * default shallow comparison correctly bails out.
+ */
+const HoursCell = memo(function HoursCell({
   assignmentId,
   week,
   entry,
   locked,
   canEditPlanned,
   canEditActual,
-  pending,
-  setPending,
+  pendingCell,
+  onCellChange,
 }: {
   assignmentId: string;
   week: number;
@@ -277,24 +306,19 @@ function HoursCell({
   locked: boolean;
   canEditPlanned: boolean;
   canEditActual: boolean;
-  pending: Map<string, PendingCell>;
-  setPending: (m: Map<string, PendingCell>) => void;
+  pendingCell: PendingCell | undefined;
+  onCellChange: (
+    assignmentId: string,
+    week: number,
+    field: "plannedHours" | "actualHours",
+    value: number | null
+  ) => void;
 }) {
   // Pending overrides win for display so the user sees their in-flight edits.
-  const key = `${assignmentId}|${week}`;
-  const pendingCell = pending.get(key);
-
   const plannedValue =
     pendingCell && "plannedHours" in pendingCell ? pendingCell.plannedHours : entry?.plannedHours ?? null;
   const actualValue =
     pendingCell && "actualHours" in pendingCell ? pendingCell.actualHours : entry?.actualHours ?? null;
-
-  const setPendingField = (field: "plannedHours" | "actualHours", value: number | null) => {
-    const next = new Map(pending);
-    const existing = next.get(key) ?? { assignmentId, projectWeek: week };
-    next.set(key, { ...existing, [field]: value });
-    setPending(next);
-  };
 
   const bgClass = locked ? "bg-gray-50" : pendingCell ? "bg-indigo-50/40" : "bg-white";
 
@@ -305,7 +329,7 @@ function HoursCell({
         disabled={!canEditPlanned}
         placeholder="—"
         toneClass="text-gray-600"
-        onSave={(v) => setPendingField("plannedHours", v)}
+        onSave={(v) => onCellChange(assignmentId, week, "plannedHours", v)}
       />
       <div className="h-px bg-gray-100 my-0.5" />
       <EditableValue
@@ -313,11 +337,11 @@ function HoursCell({
         disabled={!canEditActual}
         placeholder="—"
         toneClass="text-indigo-700 font-semibold"
-        onSave={(v) => setPendingField("actualHours", v)}
+        onSave={(v) => onCellChange(assignmentId, week, "actualHours", v)}
       />
     </td>
   );
-}
+});
 
 function EditableValue({
   value,
@@ -456,18 +480,29 @@ function UnlockButton({
   onUnlock: (reason?: string) => void;
   loading: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <button
-      onClick={() => {
-        const reason = window.prompt("Why are you unlocking this week? (optional)") ?? undefined;
-        // null is "cancel" from prompt — don't unlock.
-        if (reason === undefined) return;
-        onUnlock(reason || undefined);
-      }}
-      disabled={loading}
-      className="block mt-1 text-[10px] text-gray-400 hover:text-indigo-600 font-medium"
-    >
-      Unlock
-    </button>
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        disabled={loading}
+        className="block mt-1 text-[10px] text-gray-400 hover:text-indigo-600 font-medium"
+      >
+        Unlock
+      </button>
+      <PromptModal
+        open={open}
+        title="Unlock week"
+        message="Optionally record why this week is being unlocked. The reason is written to the audit log."
+        placeholder="e.g. Client requested late timesheet correction"
+        submitLabel="Unlock"
+        loading={loading}
+        onCancel={() => setOpen(false)}
+        onSubmit={(reason) => {
+          setOpen(false);
+          onUnlock(reason || undefined);
+        }}
+      />
+    </>
   );
 }
