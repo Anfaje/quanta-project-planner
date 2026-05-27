@@ -340,7 +340,51 @@ Should show 70 tests passing across 8 test suites:
 - **components/ui.test.tsx** — Modal focus trap + Escape + restoration, Tabs ARIA + keyboard navigation, FormInput aria-invalid + aria-describedby wiring, ConfirmModal action/tone behaviours, PromptModal value submission + validator + reset (23 tests, expanded in Drop 6c)
 - **App.test.tsx** — Suspense fallback shown while a lazy chunk loads, lazy page replaces the fallback when its import resolves (2 tests, added in Drop 6c)
 
-Use `npm run test:watch` from `packages/web/` to run tests in watch mode while iterating on UI code.
+### API integration tests (Drop 6d)
+
+The integration suite boots Express, fires real HTTP requests via Supertest, and exercises against a real Postgres. It's separate from the unit tests above — `npm test` stays fast and hermetic; `npm run test:integration` is opt-in.
+
+**Prerequisites:**
+
+- Postgres reachable on a URL the test user can drop and recreate the public schema in
+- Prisma engine binary reachable (the normal `prisma generate` postinstall must have succeeded)
+
+**Setup a test database:**
+
+```bash
+# Docker:
+docker run --rm -d --name quanta-test-db \
+  -e POSTGRES_USER=quanta_test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=quanta_test \
+  -p 5433:5432 postgres:16
+
+# Or against a local Postgres:
+psql -c "CREATE USER quanta_test WITH PASSWORD 'test';"
+psql -c "CREATE DATABASE quanta_test OWNER quanta_test;"
+```
+
+**Run the suite:**
+
+```bash
+cd packages/api
+TEST_DATABASE_URL=postgresql://quanta_test:test@localhost:5433/quanta_test \
+  npm run test:integration
+```
+
+`npm run test:all` runs the unit and integration suites back to back.
+
+The global setup uses `prisma db push --force-reset --skip-generate` to drop and recreate the schema at the start of every run, then seeds a baseline (one whitelisted domain `example.com`, three BUs `BU-A`/`BU-B`/`BU-C`, one Account `ACME`, one bootstrap AA user `aa@example.com` with the shared test password). Between-test cleanup truncates mutable tables while preserving the baseline so each `it` block starts from the same world state.
+
+Should show ~33 tests passing across 6 files:
+
+- **__integration__/auth.test.ts** — register/login/MFA + domain whitelist + `/api/me` + logout (13 tests)
+- **__integration__/projects.test.ts** — list scope, create gates, validation, detail field stripping (~10)
+- **__integration__/hours.test.ts** — IC permissions, lock/unlock with audit, fill-remaining (~7)
+- **__integration__/admin.test.ts** — role gates, role-update audit, domain/BU/account CRUD (~8)
+- **__integration__/invites.test.ts** — GET context, POST accept, expiry, dup-accept, race condition (~8)
+- **__integration__/dashboard.test.ts** — adaptive sections per role union (6)
+- **__integration__/exports.test.ts** — CSV financial stripping + PDF access (3)
+
+---
 
 ---
 

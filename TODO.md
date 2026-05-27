@@ -4,7 +4,7 @@ Outstanding work captured through Drop 6c. Items are grouped by category; within
 
 **Repository:** https://github.com/Anfaje/quanta-project-planner
 
-**Snapshot at time of writing:** 131 tests passing (61 API + 70 web), TypeScript clean across both packages. Web codebase has zero `dangerouslySetInnerHTML`, zero `window.confirm` / `window.prompt` calls, full focus traps + ARIA wiring on modals and tabs, and `SECURITY.md` capturing the threat model.
+**Snapshot at time of writing:** 164 tests passing (61 API unit + ~33 API integration + 70 web), TypeScript clean across both packages. Web codebase has zero `dangerouslySetInnerHTML`, zero `window.confirm` / `window.prompt` calls, full focus traps + ARIA wiring on modals and tabs, and `SECURITY.md` capturing the threat model.
 
 ---
 
@@ -20,9 +20,9 @@ These were surfaced by the Drop 6c audit. The tier ranking reflects relative imp
 
 ### Tier 1 — must address before any non-trivial deploy
 
-- [ ] **HTTP integration tests for the API.** Supertest against a booted Express app with a test Postgres. Cover every route's auth gating, validation, serialisation, and side effects. Single biggest confidence win available — would catch class after class of regressions invisible to current unit tests.
-- [ ] **Database tests against real Postgres.** Schema constraints, FK cascades, migration upgrade paths, complex queries like `buildProjectAccessFilter`. Today all DB interaction is mocked.
-- [ ] **End-to-end browser tests.** Playwright. At minimum: IC logs hours; PM creates a project, locks a week, unlocks with reason.
+- [x] ~~**HTTP integration tests for the API.**~~ Shipped in Drop 6d. ~33 tests across auth / projects / hours / admin / invites / dashboard / exports under `packages/api/src/__integration__/`. Run via `npm run test:integration` from `packages/api/`.
+- [ ] **Database tests against real Postgres beyond what 6d covers.** Schema constraint behavior (FK cascades on Project delete, unique on email + projectCode, etc.), migration upgrade paths from each historical schema, complex query helpers like `buildProjectAccessFilter` exercised at boundary conditions.
+- [ ] **End-to-end browser tests.** Playwright. At minimum: IC logs hours; PM creates a project, locks a week, unlocks with reason. Drop 6d gets us the API contract; this would close the UI-through-API loop.
 
 ### Tier 2 — fill in unit / component coverage
 

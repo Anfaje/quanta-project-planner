@@ -154,6 +154,7 @@ quanta-project-planner/
 | 6a | Frontend tests: vitest + RTL, 60 tests across utilities, auth, dashboard, hours grid, wizard, and shared UI primitives | ✅ |
 | 6b | A11y + security review: focus traps, aria audit, code-defense sweep, SECURITY.md | ✅ |
 | 6c | Perf + UX polish: code-splitting, memoisation, replace window.confirm/window.prompt with proper dialogs | ✅ |
+| 6d | API integration tests: Supertest + test Postgres, ~33 tests across auth / projects / hours / admin / invites / dashboard / exports | ✅ |
 | 5  | Infrastructure: Terraform, CI/CD, deployment | — |
 
 ### Drop 3 highlights
@@ -240,4 +241,38 @@ The last `window.confirm` / `window.prompt` calls are gone, the heavy pages are 
   - Wizard `Step4Financials` per-resource summary and grand totals are memoised on `[resources, plannedHours, contingencyPct, totalWeeks]`, so navigating between steps doesn't re-run the loop.
 - **`Button` now uses `forwardRef`** so `ConfirmModal` can focus the confirm action without a workaround.
 - **+10 new tests**: `ConfirmModal` (4 — render, single-call invariant, danger tone styling, Escape to cancel), `PromptModal` (4 — submit value, `initialValue` resets on reopen, validator disables submit, cancel doesn't fire submit), and `App.test.tsx` (2 — Suspense fallback shown while a lazy chunk loads, lazy page replaces the fallback once its import resolves).
+
+### Drop 6d highlights (API integration tests)
+
+Closes the Tier-1 testing gap from the Drop 6c audit: every route now has HTTP-level coverage that boots Express, fires real requests via Supertest, and exercises against a real Postgres. ~33 tests across 6 files. The unit tests (61) continue to run with `npm test`; the integration suite is opt-in via `npm run test:integration`.
+
+- **App factory** — `src/createApp.ts` extracts Express setup from `src/index.ts`. The factory takes optional `sessionStore`, `redisStatus`, and `logging` overrides so tests get an in-memory session store, a stub redis health probe, and a quiet log stream. `src/index.ts` is now ~20 lines of "wire Redis + listen" — the integration suite imports `createApp` directly.
+- **Test infrastructure** in `src/__integration__/`:
+  - `globalSetup.ts` — drops/recreates the schema via `prisma db push --force-reset` and seeds a baseline (one whitelisted domain, three BUs, one Account, one bootstrap AA user) at the start of every `test:integration` run
+  - `helpers.ts` — `setupTestApp`, `resetMutableTables` (between-test cleanup that preserves the baseline), `seedUser` / `seedProject` factories, and the killer `authenticateAs(app, email)` which walks the real two-step login + MFA flow and returns a Supertest agent with the session cookie attached. Every test user shares one TOTP secret so `currentTotpCode()` works universally.
+- **Test coverage** — what each file proves about the API surface:
+  - `auth.test.ts` (13) — register/login/MFA + domain whitelist enforcement + `/api/me` shape + logout
+  - `projects.test.ts` (~10) — list scope by role (IC sees only assigned; BUL sees BU-owned; AA sees all); create permission gates (IC 403, PM ok); validation (end<start 400, dup code 409, out-of-range weeks 400); financial field stripping on detail for ICs
+  - `hours.test.ts` (~7) — IC can edit own / can't edit others' rows / can't touch planned; PM can edit both; locked weeks reject from any role; lock/unlock permission + audit log; fill-remaining math
+  - `admin.test.ts` (~8) — IC denied / BUL allowed / AA allowed on user list; AA can promote IC→PM and audit log records the change; BUL cannot update roles; domain CRUD restricted to AA; BU/Account create restricted to AA
+  - `invites.test.ts` (~8) — GET context with 200/404/410 outcomes; POST accept creates the user, marks invite consumed, returns MFA setup payload; expired and already-accepted tokens both 410; race condition on email already taken returns 409
+  - `dashboard.test.ts` (6) — adaptive sections per role: IC sees `my_hours`, PM sees `project_health`, BUL sees `bu_health` scoped to their BU, AA sees `platform_admin`; union roles (PM + BUL) get both blocks in one response
+  - `exports.test.ts` (3) — IC's CSV strips fee / cost / rate columns; AA's CSV includes them; PDF magic-byte verification and access-denied check
+- **Configuration** — `vitest.integration.config.ts` is separate so the integration suite has its own `globalSetup`, longer timeouts, single-fork pool (the suite shares one DB), and serial file ordering. The default `vitest.config.ts` excludes `__integration__` so `npm test` stays fast and hermetic.
+- **Rate limit bypass** — `createApp`'s rate limiter honours `RATE_LIMIT_DISABLED=1`, set by `setupTestApp`. The auth/invite limits would otherwise trip after ten requests in a test run.
+
+**To run the integration suite locally** (full instructions in `SETUP.md`):
+
+```bash
+# 1. Start a test Postgres (any way you like — Docker example):
+docker run --rm -d --name quanta-test-db \
+  -e POSTGRES_USER=quanta_test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=quanta_test \
+  -p 5432:5432 postgres:16
+
+# 2. Run the integration suite:
+cd packages/api
+TEST_DATABASE_URL=postgresql://quanta_test:test@localhost:5432/quanta_test \
+  npm run test:integration
+```
+
 
