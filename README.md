@@ -4,6 +4,10 @@
 
 Quanta replaces manual Google Sheet workflows with a structured, role-aware web application for project resource estimation and actuals tracking.
 
+**Repository:** https://github.com/Anfaje/quanta-project-planner
+
+**Project status:** see [`TODO.md`](TODO.md) for the parking lot of outstanding work. Security posture: [`SECURITY.md`](SECURITY.md). Local dev setup: [`SETUP.md`](SETUP.md).
+
 ## Documentation
 
 All project documentation lives in the [`docs/`](docs/) directory:
