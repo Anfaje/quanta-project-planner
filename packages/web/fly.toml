@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────
+# Quanta Web — Fly app configuration
+#
+# Deploy from packages/web/ via:
+#   cd packages/web && fly deploy
+#
+# Before the first deploy:
+#   fly apps create quanta-web
+#   # No DB or Redis attach needed — this app is just nginx + static
+#   # dist, reverse-proxying /api/* to quanta-api via Fly's internal
+#   # network.
+#
+# API_INTERNAL_URL is set as an env (not a secret) since it's the
+# internal Fly hostname, not credentials.
+# ─────────────────────────────────────────────────────────────
+
+app           = "quanta-web"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  API_INTERNAL_URL = "http://quanta-api.internal:4000"
+
+[http_service]
+  internal_port      = 8080
+  force_https        = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 100
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval     = "15s"
+    method       = "GET"
+    timeout      = "5s"
+    # nginx returns 200 on / by serving index.html — cheap probe.
+    path         = "/"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "256mb"  # nginx + ~5MB of static files; 256mb is generous

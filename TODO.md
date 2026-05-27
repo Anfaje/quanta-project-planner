@@ -59,26 +59,22 @@ These were surfaced by the Drop 6c audit. The tier ranking reflects relative imp
 
 ## Drop 5 — Infrastructure
 
-Not started. Decisions to make before coding:
+### Drop 5a — Fly.io deploy ✅ (shipped)
 
-- [ ] Cloud target — AWS / GCP / Azure / Render / Fly?
-- [ ] Container vs serverless?
-- [ ] Database — managed Postgres (RDS / Cloud SQL / Supabase) or self-hosted?
-- [ ] Redis — managed (ElastiCache / Upstash) or self?
-- [ ] Secrets — Vault / AWS Secrets Manager / Doppler?
-- [ ] CI — GitHub Actions assumed; needs build, lint, typecheck, both test suites, `npm audit`
-- [ ] Deployment strategy — blue/green, rolling, or recreate?
+Production Dockerfiles, fly.toml × 2, nginx reverse-proxy template, DEPLOY.md runbook. See [`DEPLOY.md`](DEPLOY.md) for the step-by-step.
 
-Then:
+### Drop 5b — Production hardening (deferred)
 
-- [ ] Terraform modules for the chosen provider
-- [ ] CI workflow files in `.github/workflows/`
-- [ ] Production-grade Dockerfiles for both packages (dev images exist via Docker Compose)
-- [ ] Health-check endpoints — `/api/health` exists but needs a depth probe (db + redis reachable)
-- [ ] Logging / monitoring (Sentry / Datadog / stdout → CloudWatch?)
-- [ ] Backup strategy for Postgres + Redis sessions
-- [ ] TLS / cert rotation
-- [ ] CORS origin pinned to production `WEB_URL`
+The "we have paying users" upgrades. Defer until that's actually true:
+
+- [ ] **Terraform** modules so the Fly setup is reproducible from code (apps + Postgres + Redis + secrets templates)
+- [ ] **GitHub Actions CI/CD** — on every PR: lint + typecheck + both test suites (unit + integration with ephemeral Postgres service container). On merge to `main`: auto-deploy api and web in sequence, gated on health check
+- [ ] **Custom domain + cert** on Fly (replace `quanta-web.fly.dev` with `quanta.your-company.com`)
+- [ ] **Staging environment** — `quanta-api-staging` + `quanta-web-staging` alongside prod, deployed from a `staging` branch
+- [ ] **Observability** — Sentry (errors) + structured log aggregation. Fly streams pino-http output to stdout; pipe it to Datadog / Logtail / etc.
+- [ ] **`npm audit`** wired into CI (folds into the GH Actions work)
+- [ ] **Backup strategy** beyond Fly's Postgres defaults — point-in-time recovery, off-Fly snapshots
+- [ ] **Cloud target decision review** — Fly is right for the testing stage; revisit AWS / GCP if scale or compliance demands it
 
 ---
 

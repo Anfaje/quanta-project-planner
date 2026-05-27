@@ -1,0 +1,21 @@
+# Build artefacts and dev junk that should never enter the web image.
+node_modules
+dist
+.env
+.env.*
+*.log
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Tests
+**/*.test.ts
+**/*.test.tsx
+src/test
+src/App.test.tsx
+
+# Docker artefacts
+Dockerfile
+.dockerignore

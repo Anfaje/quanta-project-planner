@@ -40,6 +40,13 @@ export interface CreateAppOptions {
 export function createApp(opts: CreateAppOptions = {}): Express {
   const app = express();
 
+  // Trust Fly's edge proxy (and any single reverse-proxy hop in front)
+  // so req.secure honours X-Forwarded-Proto and the SameSite=strict +
+  // secure cookie correctly. Setting "1" rather than `true` so we don't
+  // blindly trust arbitrary depth — relevant if rate-limit ever uses
+  // req.ip for keys.
+  app.set("trust proxy", 1);
+
   // ── Core middleware ──
   app.use(helmet());
   app.use(

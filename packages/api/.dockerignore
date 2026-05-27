@@ -1,0 +1,23 @@
+# Build artefacts and dev junk that should never enter the API image.
+node_modules
+dist
+.env
+.env.*
+*.log
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+
+# Test infrastructure is dev-only — keep the image small + the source
+# of production code review focused.
+src/__tests__
+src/__integration__
+vitest.config.ts
+vitest.integration.config.ts
+
+# Docker artefacts themselves
+Dockerfile
+Dockerfile.dev
+.dockerignore

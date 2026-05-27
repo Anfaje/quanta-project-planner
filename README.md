@@ -6,7 +6,7 @@ Quanta replaces manual Google Sheet workflows with a structured, role-aware web 
 
 **Repository:** https://github.com/Anfaje/quanta-project-planner
 
-**Project status:** see [`TODO.md`](TODO.md) for the parking lot of outstanding work. Security posture: [`SECURITY.md`](SECURITY.md). Local dev setup: [`SETUP.md`](SETUP.md).
+**Project status:** see [`TODO.md`](TODO.md) for the parking lot of outstanding work. Security posture: [`SECURITY.md`](SECURITY.md). Local dev setup: [`SETUP.md`](SETUP.md). Deploy to Fly.io: [`DEPLOY.md`](DEPLOY.md).
 
 ## Documentation
 
@@ -155,7 +155,8 @@ quanta-project-planner/
 | 6b | A11y + security review: focus traps, aria audit, code-defense sweep, SECURITY.md | ✅ |
 | 6c | Perf + UX polish: code-splitting, memoisation, replace window.confirm/window.prompt with proper dialogs | ✅ |
 | 6d | API integration tests: Supertest + test Postgres, ~33 tests across auth / projects / hours / admin / invites / dashboard / exports | ✅ |
-| 5  | Infrastructure: Terraform, CI/CD, deployment | — |
+| 5a | Fly.io deploy: production Dockerfiles, fly.toml × 2, nginx reverse-proxy template, DEPLOY.md runbook | ✅ |
+| 5b | Terraform + CI/CD + custom domain + staging env + observability | 🔜 |
 
 ### Drop 3 highlights
 

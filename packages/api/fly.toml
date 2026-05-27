@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────
+# Quanta API — Fly app configuration
+#
+# Deploy from packages/api/ via:
+#   fly deploy --config fly.toml --dockerfile Dockerfile
+# or just:
+#   cd packages/api && fly deploy
+#
+# Before the first deploy:
+#   fly apps create quanta-api
+#   fly postgres create --name quanta-db --region ord
+#   fly postgres attach quanta-db --app quanta-api
+#     (this auto-sets DATABASE_URL on the API app)
+#   fly redis create --name quanta-redis --region ord
+#     (copy the printed REDIS_URL into fly secrets below)
+#   fly secrets set --app quanta-api \
+#     SESSION_SECRET="$(openssl rand -hex 32)" \
+#     TOTP_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+#     REDIS_URL="<from fly redis create>" \
+#     WEB_URL="https://quanta-web.fly.dev"
+# ─────────────────────────────────────────────────────────────
+
+app           = "quanta-api"
+primary_region = "ord"  # Chicago — matches the user's location
+
+# Drop "kill_signal" defaults; tini in the image handles SIGTERM.
+
+# Run prisma migrations against the attached Postgres before the new
+# image goes live. If migrations fail the deploy is aborted and the
+# previous version keeps serving — Fly's standard release-command
+# semantics.
+[deploy]
+  release_command = "npx prisma migrate deploy"
+  strategy        = "rolling"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  API_PORT = "4000"
+  # WEB_URL is intentionally not set here — it's a secret so it can be
+  # rotated without re-deploying code. Set it via `fly secrets set`.
+
+[http_service]
+  internal_port      = 4000
+  force_https        = true
+  auto_stop_machines = false  # keep warm for testing — flip to true once we have CI
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 50
+    hard_limit = 100
+
+  # Fly's health checker hits /api/health on the http_service port.
+  # createApp's /api/health probes Postgres via SELECT 1 + reports
+  # Redis status; 503 if either is down so Fly will keep the previous
+  # machine serving during a failed deploy.
+  [[http_service.checks]]
+    grace_period  = "30s"
+    interval      = "15s"
+    method        = "GET"
+    timeout       = "5s"
+    path          = "/api/health"
+
+# Shared-1x is the cheapest tier and plenty for testing.
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "512mb"
