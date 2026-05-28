@@ -63,16 +63,19 @@ These were surfaced by the Drop 6c audit. The tier ranking reflects relative imp
 
 Production Dockerfiles, fly.toml × 2, nginx reverse-proxy template, DEPLOY.md runbook. See [`DEPLOY.md`](DEPLOY.md) for the step-by-step.
 
-### Drop 5b — Production hardening (deferred)
+### Drop 5b — GitHub Actions CI/CD ✅ (shipped)
+
+Two workflows in `.github/workflows/` — one per package. Path-filtered so a docs change doesn't trigger CI; cancel-in-progress on PRs but not on main deploys. The API CI spins up Postgres as a service container and runs the full integration suite from Drop 6d. Deploys on push to `main` after CI passes. See [`DEPLOY.md`](DEPLOY.md) § 7 for the one-time `FLY_API_TOKEN` setup.
+
+### Drop 5c — Production hardening (deferred)
 
 The "we have paying users" upgrades. Defer until that's actually true:
 
 - [ ] **Terraform** modules so the Fly setup is reproducible from code (apps + Postgres + Redis + secrets templates)
-- [ ] **GitHub Actions CI/CD** — on every PR: lint + typecheck + both test suites (unit + integration with ephemeral Postgres service container). On merge to `main`: auto-deploy api and web in sequence, gated on health check
 - [ ] **Custom domain + cert** on Fly (replace `quanta-web.fly.dev` with `quanta.your-company.com`)
 - [ ] **Staging environment** — `quanta-api-staging` + `quanta-web-staging` alongside prod, deployed from a `staging` branch
 - [ ] **Observability** — Sentry (errors) + structured log aggregation. Fly streams pino-http output to stdout; pipe it to Datadog / Logtail / etc.
-- [ ] **`npm audit`** wired into CI (folds into the GH Actions work)
+- [ ] **`npm audit`** wired into CI (small extension to the existing workflows)
 - [ ] **Backup strategy** beyond Fly's Postgres defaults — point-in-time recovery, off-Fly snapshots
 - [ ] **Cloud target decision review** — Fly is right for the testing stage; revisit AWS / GCP if scale or compliance demands it
 

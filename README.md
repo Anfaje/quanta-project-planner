@@ -156,7 +156,8 @@ quanta-project-planner/
 | 6c | Perf + UX polish: code-splitting, memoisation, replace window.confirm/window.prompt with proper dialogs | ✅ |
 | 6d | API integration tests: Supertest + test Postgres, ~33 tests across auth / projects / hours / admin / invites / dashboard / exports | ✅ |
 | 5a | Fly.io deploy: production Dockerfiles, fly.toml × 2, nginx reverse-proxy template, DEPLOY.md runbook | ✅ |
-| 5b | Terraform + CI/CD + custom domain + staging env + observability | 🔜 |
+| 5b | GitHub Actions CI/CD: workflow per package, path filters, integration tests against ephemeral Postgres, auto-deploy on main | ✅ |
+| 5c | Production hardening: Terraform, staging env, custom domain, observability, backups | 🔜 |
 
 ### Drop 3 highlights
 

@@ -1,0 +1,73 @@
+name: Web — CI + Deploy
+
+# Same trigger pattern as the API workflow — path-filtered so a
+# docs-only or api-only PR doesn't run web CI.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/web/**'
+      - '.github/workflows/web.yml'
+  pull_request:
+    paths:
+      - 'packages/web/**'
+      - '.github/workflows/web.yml'
+
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ─── CI ──────────────────────────────────────────────────────
+  # Typecheck, run the 70-test vitest suite, then run the actual
+  # production vite build. The build step is the cheap insurance —
+  # catches things like a missing import or a Tailwind class typo
+  # that vitest wouldn't notice.
+  test:
+    name: Typecheck + Tests + Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+        working-directory: packages/web
+
+      - name: Vitest
+        run: npm test
+        working-directory: packages/web
+
+      # Vite build is fast (~3s) and verifies the prod bundle compiles
+      # cleanly — Tailwind purge, code-splitting boundaries, etc.
+      - name: Vite build (smoke)
+        run: npm run build
+        working-directory: packages/web
+
+  # ─── Deploy to Fly ──────────────────────────────────────────
+  deploy:
+    name: Deploy to Fly.io
+    needs: [test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: web-deploy-prod
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        working-directory: packages/web
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

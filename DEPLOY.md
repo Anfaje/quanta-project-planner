@@ -136,6 +136,8 @@ Log in with the AA credentials from step 4. You should land on the dashboard. Cl
 
 ## 6. Re-deploy on changes
 
+Once CI/CD is wired up (next section), you don't need to do this manually — just push to `main`. Until then, or for one-off out-of-band deploys:
+
 ```bash
 # Push code changes
 git push origin main
@@ -146,6 +148,47 @@ cd packages/web && fly deploy
 ```
 
 For the API, `prisma migrate deploy` runs again as a release command — new migrations applied before the new image goes live.
+
+---
+
+## 7. Wire up CI/CD (recommended)
+
+GitHub Actions can take over from manual `fly deploy`. Two workflows live in [`.github/workflows/`](.github/workflows/):
+
+- `api.yml` — typecheck + unit tests + integration tests against an ephemeral Postgres + deploy on push to `main`
+- `web.yml` — typecheck + tests + vite build + deploy on push to `main`
+
+Both run CI on every PR (no deploy) and auto-deploy when the matching package's code changes land on `main`. Path filters mean a docs-only or web-only change doesn't kick off API CI, and vice versa.
+
+### One-time setup
+
+Get a Fly deploy token from your workstation and paste it into the GitHub repo secrets:
+
+```bash
+# Create a long-lived deploy-scoped token (recommended over fly auth token,
+# which has full account power).
+fly tokens create deploy --expiry 999999h
+```
+
+Copy the printed `FlyV1 ...` string. Then:
+
+1. Open https://github.com/Anfaje/quanta-project-planner/settings/secrets/actions
+2. Click **New repository secret**
+3. Name: `FLY_API_TOKEN`
+4. Value: the token from `fly tokens create deploy` (paste the whole thing including the `FlyV1 ` prefix)
+5. Save
+
+That's it. The next push to `main` that touches `packages/api/**` or `packages/web/**` will trigger CI, and if it passes, deploy.
+
+### What you'll see
+
+On a PR, the **Checks** tab will show the relevant CI jobs run and (for the API) the integration suite spinning up Postgres. Required check status surfaces in the merge button. On merge to `main`, the deploy job kicks off — typically 90–120 seconds for the API (build + push + release migration + machine swap), 60 seconds for the web app.
+
+If a deploy job fails after CI passed (e.g. a migration conflict at release time), the previous machine keeps serving — Fly only swaps once the new machine reports healthy.
+
+### Out-of-band deploys
+
+You can still run `fly deploy` manually from your workstation any time — useful for hotfix branches, or to roll back via `fly deploy --image registry.fly.io/quanta-api:deployment-XXXX`. The CI deploys and manual deploys share the same concurrency group on Fly's side, so a manual deploy won't race a CI one.
 
 ---
 

@@ -1,0 +1,130 @@
+name: API — CI + Deploy
+
+# Triggers:
+#   - PRs that touch packages/api/** or this workflow file → CI only
+#   - Pushes to main that touch the same paths → CI + auto-deploy
+#
+# The `paths:` filter means a docs-only PR or a web-package change
+# doesn't kick off CI here — saves runner minutes and keeps the
+# required-checks list focused on what actually changed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/api/**'
+      - '.github/workflows/api.yml'
+  pull_request:
+    paths:
+      - 'packages/api/**'
+      - '.github/workflows/api.yml'
+
+# Cancel in-flight CI for the same PR when a new commit lands, but let
+# every push to main finish its deploy in order — production deploys
+# should never be cancelled mid-flight.
+concurrency:
+  group: api-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ─── Unit suite ──────────────────────────────────────────────
+  # No DB, no network. Runs the 61 vitest tests + typecheck. Fast
+  # feedback — should finish in well under a minute.
+  unit:
+    name: Typecheck + Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Install at the root so npm workspaces resolves. The api package's
+      # `postinstall: prisma generate` runs as part of this and pulls the
+      # prisma engine — GH runners have open egress to binaries.prisma.sh,
+      # so this works here even though it doesn't in some sandboxes.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+        working-directory: packages/api
+
+      - name: Unit tests
+        run: npm test
+        working-directory: packages/api
+
+  # ─── Integration suite ──────────────────────────────────────
+  # Boots an ephemeral Postgres 16 service container, points the test
+  # runner at it via TEST_DATABASE_URL, runs the ~33 supertest cases
+  # from Drop 6d. Takes ~2 minutes including startup.
+  integration:
+    name: Integration Tests (Supertest + Postgres)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: quanta_test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: quanta_test
+        ports:
+          - 5432:5432
+        # Health check so the integration job doesn't start until
+        # Postgres is actually accepting connections — GH Actions runs
+        # subsequent steps as soon as the container reports running,
+        # not necessarily when Postgres is ready.
+        options: >-
+          --health-cmd="pg_isready -U quanta_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      TEST_DATABASE_URL: postgresql://quanta_test:test@localhost:5432/quanta_test
+      # No Redis service: the integration tests use the default in-memory
+      # session store via createApp's default sessionStore.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Integration tests
+        run: npm run test:integration
+        working-directory: packages/api
+
+  # ─── Deploy to Fly ──────────────────────────────────────────
+  # Only runs on push to main, only after both test jobs pass. The
+  # concurrency group means two pushes can't deploy in parallel
+  # (cancel-in-progress: false → they queue and run in order).
+  deploy:
+    name: Deploy to Fly.io
+    needs: [unit, integration]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: api-deploy-prod
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # flyctl reads FLY_API_TOKEN from the env. The token is a
+      # repo secret created via:
+      #   fly tokens create deploy -x 999999h
+      # then pasted into Settings → Secrets and variables → Actions.
+      - name: Deploy
+        run: flyctl deploy --remote-only
+        working-directory: packages/api
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
