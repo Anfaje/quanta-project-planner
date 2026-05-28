@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { lazy, Suspense } from "react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { render, screen, waitFor } from "@testing-library/react";

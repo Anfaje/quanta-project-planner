@@ -215,7 +215,7 @@ If `db` or `redis` is `disconnected`, see Troubleshooting below.
 
 ## 6. Seed the bootstrap admin user
 
-You still can't log in — there's no user in the database. The seed script (from Drop 1) creates one bootstrap AA along with sample BUs, accounts, and domains.
+You still can't log in — there's no user in the database. The seed script (from Drop 1) creates one bootstrap AA along with sample BUs, accounts, domains, and a small fixture team.
 
 In the Fly dashboard:
 
@@ -227,7 +227,18 @@ In the shell that opens, run:
 npx tsx prisma/seed.ts
 ```
 
-The script prints the seeded user's email and a temporary password at the end. **Save these in your password manager immediately** — the password is fine as a one-time bootstrap but you should rotate it once logged in.
+**What gets seeded** (so you know what to expect):
+
+| | Value |
+|---|---|
+| Whitelisted email domains | `trifork.com`, `trifork-na.com`, `spantree.com` |
+| Bootstrap AA login | `sarah@trifork.com` |
+| **Bootstrap password (all users)** | `quanta123` |
+| Business Units | US-ORD-OWLS, DK-AAR-PANDA, US-CA-SE, EU-BER-FOXES |
+| Accounts | A few fixture accounts |
+| Sample users | ~13 across the various roles |
+
+> ⚠️ **`quanta123` is a hard-coded dev password.** Log in immediately and change it via the admin console. The seed script lives in source — you should also rotate it to either skip user creation in prod or generate random per-user passwords ([TODO.md](TODO.md) flags this).
 
 ---
 

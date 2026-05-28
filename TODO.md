@@ -10,7 +10,8 @@ Outstanding work captured through Drop 6c. Items are grouped by category; within
 
 ## Immediate / unblocked
 
-- [ ] **Push the Drop 6c commit.** Local at `79f7efc`, ahead of `origin/main` (`868897e`). The GitHub token used through Drop 6b was rotated mid-session; needs a fresh token or a manual push from a workstation with credentials. Once pushed, this TODO commit should follow.
+- [ ] **Generate proper Prisma migration files before any production data exists.** The first deploy uses `prisma db push` (declared in `packages/api/fly.toml`) because Drop 1 never created a `migrations/` folder. Fine for e2e testing — destructive for prod once real data is in. The migration path is documented inline in fly.toml; the work is one local command (`npx prisma migrate dev --name init`) plus a commit, then flip the release_command. Do this **before** the first non-test user.
+- [ ] **Patch `packages/api/prisma/seed.ts` to either skip users in prod or randomize their password.** Today it hard-codes `quanta123` for every seeded user including the bootstrap AA. Acceptable for the first 60 seconds of a fresh deploy when only you know the URL; risky if the deploy URL ever gets shared.
 
 ---
 
