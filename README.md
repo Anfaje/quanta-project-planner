@@ -6,7 +6,7 @@ Quanta replaces manual Google Sheet workflows with a structured, role-aware web 
 
 **Repository:** https://github.com/Anfaje/quanta-project-planner
 
-**Project status:** see [`TODO.md`](TODO.md) for the parking lot of outstanding work. Security posture: [`SECURITY.md`](SECURITY.md). Local dev setup: [`SETUP.md`](SETUP.md). Deploy to Fly.io: [`DEPLOY.md`](DEPLOY.md).
+**Project status:** see [`TODO.md`](TODO.md) for the parking lot of outstanding work, and [`SPEC_AUDIT.md`](SPEC_AUDIT.md) for the implementation-vs-requirements audit. Security posture: [`SECURITY.md`](SECURITY.md). Local dev setup: [`SETUP.md`](SETUP.md). Deploy to Fly.io: [`DEPLOY.md`](DEPLOY.md).
 
 ## Documentation
 

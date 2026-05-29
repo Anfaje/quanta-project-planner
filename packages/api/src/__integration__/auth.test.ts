@@ -95,16 +95,27 @@ describe("POST /api/auth/register", () => {
     expect(res.status).toBe(409);
   });
 
-  it("rejects passwords shorter than 12 characters", async () => {
+  it("rejects passwords shorter than 8 characters", async () => {
     const res = await request(app).post("/api/auth/register").send({
       email: `weak@${TEST_DOMAIN}`,
       name: "Weak",
-      password: "short",
+      password: "short", // 5 chars
       projectRoles: [],
     });
 
     expect(res.status).toBe(400);
     expect(res.body.details).toBeDefined();
+  });
+
+  it("accepts an exactly-8-character password (boundary)", async () => {
+    const res = await request(app).post("/api/auth/register").send({
+      email: `boundary@${TEST_DOMAIN}`,
+      name: "Boundary",
+      password: "12345678", // exactly 8 — the documented minimum (TC 1.16)
+      projectRoles: [],
+    });
+
+    expect(res.status).toBe(201);
   });
 });
 

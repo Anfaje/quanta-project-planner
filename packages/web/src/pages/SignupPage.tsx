@@ -11,6 +11,24 @@ import { Button, FormInput, Alert, Spinner } from "../components/ui";
  * /register. The server is still the source of truth; this is display.
  */
 
+// Suggested project roles offered as multi-select pills at signup
+// (TC 1.8/1.14). project_roles is free-form text[] in the schema, so this
+// is a curated starter list matching the seed vocabulary — a user can hold
+// any of these; an AA can add more later. Selecting none is allowed (TC 1.15).
+const PROJECT_ROLE_OPTIONS = [
+  "iOS Dev",
+  "Android Dev",
+  "Backend",
+  "Frontend",
+  "Full Stack",
+  "Designer",
+  "UX Lead",
+  "ML Engineer",
+  "3D Dev",
+  "DevOps",
+  "QA Lead",
+];
+
 export function SignupPage() {
   const navigate = useNavigate();
 
@@ -18,6 +36,7 @@ export function SignupPage() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [projectRoles, setProjectRoles] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -46,10 +65,15 @@ export function SignupPage() {
     return domains.includes(emailDomain);
   }, [domains, emailDomain]);
 
+  const toggleRole = (role: string) =>
+    setProjectRoles((prev) =>
+      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]
+    );
+
   const canSubmit =
     email.includes("@") &&
     name.trim().length >= 1 &&
-    password.length >= 12 &&
+    password.length >= 8 &&
     domainAllowed !== false;
 
   const submit = async (e: React.FormEvent) => {
@@ -61,7 +85,7 @@ export function SignupPage() {
         email,
         name,
         password,
-        projectRoles: [],
+        projectRoles,
       });
       navigate("/login/mfa-setup", {
         state: { mfaSetup: res.mfaSetup, from: "/dashboard" },
@@ -128,11 +152,55 @@ export function SignupPage() {
           type="password"
           value={password}
           onChange={setPassword}
-          placeholder="at least 12 characters"
+          placeholder="at least 8 characters"
           autoComplete="new-password"
-          hint="Minimum 12 characters."
+          hint="Minimum 8 characters."
           required
         />
+
+        <fieldset className="mt-4">
+          <legend className="block text-sm font-medium text-gray-700 mb-1.5">
+            Project roles <span className="font-normal text-gray-400">(optional)</span>
+          </legend>
+          <p className="text-xs text-gray-500 mb-2">
+            Pick the skills you'd be assigned for. You can change these later.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {PROJECT_ROLE_OPTIONS.map((role) => {
+              const selected = projectRoles.includes(role);
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => toggleRole(role)}
+                  aria-pressed={selected}
+                  className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                    selected
+                      ? "bg-indigo-600 border-indigo-600 text-white"
+                      : "bg-white border-gray-300 text-gray-600 hover:border-indigo-300"
+                  }`}
+                >
+                  {selected && (
+                    <svg
+                      className="w-3 h-3"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3.1 3.1 6.8-6.8a1 1 0 011.4 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  )}
+                  {role}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+
         <Button type="submit" loading={submitting} disabled={!canSubmit} className="w-full mt-2">
           Create account
         </Button>

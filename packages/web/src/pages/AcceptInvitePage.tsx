@@ -59,7 +59,7 @@ export function AcceptInvitePage() {
   const canSubmit =
     context !== null &&
     name.trim().length >= 1 &&
-    password.length >= 12 &&
+    password.length >= 8 &&
     password === confirmPassword;
 
   const submit = async (e: React.FormEvent) => {
@@ -162,9 +162,9 @@ export function AcceptInvitePage() {
           type="password"
           value={password}
           onChange={setPassword}
-          placeholder="at least 12 characters"
+          placeholder="at least 8 characters"
           autoComplete="new-password"
-          hint="Minimum 12 characters."
+          hint="Minimum 8 characters."
           required
         />
         <FormInput

@@ -10,6 +10,8 @@ Outstanding work captured through Drop 6c. Items are grouped by category; within
 
 ## Immediate / unblocked
 
+- [ ] **Decide: weekly vs daily hours grid.** The biggest spec divergence — see [`SPEC_AUDIT.md`](SPEC_AUDIT.md) § "The one architectural divergence". `HourEntry` is weekly; arch §6.3 + ~12 test cases describe a daily Mon–Fri grid with week-arrow navigation. This blocks any further hours-grid work and has a data-migration implication. Needs a product call before code.
+- [ ] **Work the ranked gap backlog in [`SPEC_AUDIT.md`](SPEC_AUDIT.md).** A full implementation-vs-requirements pass produced a Tier 1/2/3 backlog (CSV hours import, forgot-password, welcome screen, monthly trajectory data, project-sharing UI, …). That document is the authoritative gap list now.
 - [ ] **Generate proper Prisma migration files before any production data exists.** The first deploy uses `prisma db push` (declared in `packages/api/fly.toml`) because Drop 1 never created a `migrations/` folder. Fine for e2e testing — destructive for prod once real data is in. The migration path is documented inline in fly.toml; the work is one local command (`npx prisma migrate dev --name init`) plus a commit, then flip the release_command. Do this **before** the first non-test user.
 - [ ] **Patch `packages/api/prisma/seed.ts` to either skip users in prod or randomize their password.** Today it hard-codes `quanta123` for every seeded user including the bootstrap AA. Acceptable for the first 60 seconds of a fresh deploy when only you know the URL; risky if the deploy URL ever gets shared.
 

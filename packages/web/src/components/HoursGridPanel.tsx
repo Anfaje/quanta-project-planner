@@ -322,6 +322,22 @@ const HoursCell = memo(function HoursCell({
 
   const bgClass = locked ? "bg-gray-50" : pendingCell ? "bg-indigo-50/40" : "bg-white";
 
+  // Cell coloring per spec (TC 2.10 / 8.19): the actual value turns green
+  // when it matches the planned number, indigo when it differs, and stays
+  // neutral gray while no actual is entered (the planned value then shows
+  // through as a placeholder — TC 8.20).
+  const actualEntered = actualValue != null && actualValue !== 0;
+  const matchesPlan =
+    actualEntered && plannedValue != null && Number(actualValue) === Number(plannedValue);
+  const actualTone = !actualEntered
+    ? "text-gray-400"
+    : matchesPlan
+    ? "text-emerald-700 font-semibold"
+    : "text-indigo-700 font-semibold";
+  // Empty actual cells show the planned hours as a light-gray placeholder so
+  // the contributor sees the target and types to override it.
+  const actualPlaceholder = plannedValue != null ? formatHours(plannedValue) : "—";
+
   return (
     <td className={`px-1.5 py-1 text-center border-l border-gray-50 ${bgClass}`}>
       <EditableValue
@@ -335,8 +351,8 @@ const HoursCell = memo(function HoursCell({
       <EditableValue
         value={actualValue}
         disabled={!canEditActual}
-        placeholder="—"
-        toneClass="text-indigo-700 font-semibold"
+        placeholder={actualPlaceholder}
+        toneClass={actualTone}
         onSave={(v) => onCellChange(assignmentId, week, "actualHours", v)}
       />
     </td>

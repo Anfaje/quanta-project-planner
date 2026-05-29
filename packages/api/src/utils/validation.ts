@@ -42,7 +42,12 @@ export const acceptInviteSchema = z.object({
   name: z.string().min(1, "Name is required").max(120),
   password: z
     .string()
-    .min(12, "Password must be at least 12 characters")
+    // 8-char minimum to match the registration path (validation.ts:5) and
+    // the signed-off test cases (TC 1.16/1.17). Previously this path alone
+    // required 12, an internal inconsistency: a direct signup needed 8 but
+    // an invited user needed 12. If a stronger policy is wanted, bump BOTH
+    // schemas to 12 and update the test-case doc's "8 characters" references.
+    .min(8, "Password must be at least 8 characters")
     .max(100, "Password too long"),
 });
 
