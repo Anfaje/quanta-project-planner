@@ -28,23 +28,21 @@ Last updated: audit pass following Drop 5b.
 
 ---
 
-## ⚠️ The one architectural divergence — needs your decision
+## ✅ Resolved by decision — hours grid stays weekly
 
-### Hours grid: **weekly** (built) vs **daily Mon–Fri** (specified)
+**Decision (post-audit):** keep the **weekly** hours grid; the spec and test cases were updated to match, rather than rebuilding to daily.
 
-**What's built:** `HourEntry` stores one `plannedHours` + one `actualHours` per `(assignment, projectWeek)`. The grid shows every project week as a column (W1…Wn).
+Rationale: weekly granularity is already built, tested, and sufficient when time rolls up weekly for billing. Daily Mon–Fri would have rippled through the data model, hours API, wizard Step 3, and burn-chart math with a data-migration cost — not worth it absent a hard requirement for per-day entry.
 
-**What the spec describes:** a **daily Mon–Fri grid** with one week visible at a time, navigated by arrows with a fixed-width *Today* button to their left, the current day highlighted, future weeks disabled. This is stated in arch §6.3 and assumed by ~12 test cases:
+**Docs updated to reflect the weekly reality (tracked changes, author "Claude"):**
+- `Quanta_Reference_Architecture.docx` §6.3 (hours grid) and the §5 API hours-endpoint description — daily Mon–Fri / week-arrow nav / Today button / current-day highlight / future-week lockout / `is_future` flag all replaced with the weekly model (one column per project week, sticky resource column, lock ribbons, per-week fill-remaining, green/indigo cells, planned-as-placeholder).
+- `Quanta_Test_Cases.docx` — 13 cells across IC §2 (2.9, 2.11, 2.17, 2.18, 2.19, 2.21) and Edge §8 (8.18) rewritten from daily/Today-button/future-disable behavior to the weekly grid. Notably **8.19 (green/indigo) and 8.20 (planned-placeholder) were left unchanged — the implementation now satisfies them** after the cell-coloring fix in this pass.
 
-> TC 2.9 "own row across Mon–Fri" · 2.10 day-cell entry · 2.11 future-week cells disabled · 2.17–2.19 week-arrow nav + Today button · 8.18 Today-button placement · 8.19 cell green/indigo · 8.20 planned-as-placeholder
+The visual behaviors the daily spec called for (cell coloring, planned placeholder) were pulled onto the weekly grid regardless, so nothing of value was lost.
 
-**Why this isn't a quick fix:** daily granularity changes the data model (`HourEntry` needs a day dimension — either 5 rows/week or mon..fri columns), the hours API (writes, lock semantics, fill-remaining), the wizard's Step 3 planned-hours grid, and the burn-chart aggregation. It's a vertical slice through every layer.
+### Original divergence (kept for the record)
 
-**Options:**
-- **(A) Keep weekly.** Simpler, already built and tested. The cell-coloring + placeholder fixes above already pulled the *visual* behaviors forward onto the weekly grid. Update the spec/test-cases to describe weekly granularity.
-- **(B) Rebuild to daily.** Matches the prototypes and the 12 test cases. Best done as a dedicated **"Drop 7 — daily hours model"** because of the cross-layer ripple and the data-migration implication.
-
-**Recommendation:** decide based on whether day-level time entry is a real product requirement or an artifact of the prototype. If timesheets only ever roll up weekly for billing, (A) is fine and cheaper. If contributors genuinely log per-day, (B) — scheduled as its own drop. **No code should be rewritten here without that decision.**
+`HourEntry` stores one `plannedHours` + one `actualHours` per `(assignment, projectWeek)`; the grid shows every project week as a column. The prior spec (arch §6.3 + ~12 test cases) described a daily Mon–Fri grid with one week visible at a time, navigated by arrows with a Today button. That language is now corrected.
 
 ---
 
