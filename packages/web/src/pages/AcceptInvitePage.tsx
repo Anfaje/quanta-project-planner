@@ -77,7 +77,16 @@ export function AcceptInvitePage() {
         { name, password }
       );
       navigate("/login/mfa-setup", {
-        state: { mfaSetup: res.mfaSetup, from: "/dashboard" },
+        state: {
+          mfaSetup: res.mfaSetup,
+          from: "/dashboard",
+          welcome: {
+            kind: "invite",
+            buName: context?.bu?.name,
+            role: context?.projectRole ?? null,
+            inviter: context?.invitedBy?.name,
+          },
+        },
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not accept invitation");

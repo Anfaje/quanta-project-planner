@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { LoginPage, MfaVerifyPage } from "./pages/LoginPage";
 import { MfaSetupPage } from "./pages/MfaSetupPage";
 import { SignupPage } from "./pages/SignupPage";
+import { WelcomePage } from "./pages/WelcomePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsListPage } from "./pages/ProjectsListPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
@@ -66,6 +67,7 @@ export default function App() {
           <Route path="/login/mfa" element={<MfaVerifyPage />} />
           <Route path="/login/mfa-setup" element={<MfaSetupPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/welcome" element={<WelcomePage />} />
           <Route path="/invite/:token" element={<AcceptInvitePage />} />
 
           {/* ── Protected app routes ── */}

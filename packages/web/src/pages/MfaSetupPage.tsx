@@ -24,6 +24,11 @@ import { Button, FormInput, Alert } from "../components/ui";
 interface LocationState {
   mfaSetup?: { qrUri: string; manualKey: string };
   from?: string;
+  // Forwarded to /welcome after enrollment so the greeting can show the
+  // right variant. Shape mirrors WelcomePage's WelcomeState.
+  welcome?:
+    | { kind: "direct" }
+    | { kind: "invite"; buName?: string; role?: string | null; inviter?: string };
 }
 
 export function MfaSetupPage() {
@@ -64,7 +69,18 @@ export function MfaSetupPage() {
     try {
       await api.post<MfaVerifyResponse>("/api/auth/mfa/verify", { code });
       await refresh();
-      navigate(state.from ?? "/dashboard", { replace: true });
+      // First-time enrollment always lands on the welcome screen, which
+      // then forwards to the intended destination. If no welcome context
+      // was supplied (defensive — shouldn't happen from signup/invite),
+      // go straight to the destination.
+      if (state.welcome) {
+        navigate("/welcome", {
+          replace: true,
+          state: { welcome: state.welcome, dest: state.from ?? "/dashboard" },
+        });
+      } else {
+        navigate(state.from ?? "/dashboard", { replace: true });
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Verification failed");
       setSubmitting(false);

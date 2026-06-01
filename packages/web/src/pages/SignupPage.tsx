@@ -88,7 +88,7 @@ export function SignupPage() {
         projectRoles,
       });
       navigate("/login/mfa-setup", {
-        state: { mfaSetup: res.mfaSetup, from: "/dashboard" },
+        state: { mfaSetup: res.mfaSetup, from: "/dashboard", welcome: { kind: "direct" } },
       });
     } catch (err) {
       if (err instanceof ApiError) {
