@@ -148,3 +148,8 @@ export const hoursImportSchema = z.object({
   csv: z.string().min(1, "CSV content is required").max(1_000_000, "CSV too large"),
 });
 
+// Share a project with another business unit (TC 4.10/5.22).
+export const shareProjectSchema = z.object({
+  buId: z.string().uuid(),
+});
+

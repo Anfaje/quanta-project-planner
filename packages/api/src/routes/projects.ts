@@ -35,6 +35,7 @@ import {
   updateAssignmentSchema,
   hoursBatchSchema,
   hoursImportSchema,
+  shareProjectSchema,
   unlockWeekSchema,
 } from "../utils/validation";
 
@@ -461,8 +462,85 @@ router.post("/:id/archive", async (req: Request, res: Response) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// RESOURCE ASSIGNMENTS
+// PROJECT SHARING (cross-BU visibility) — TC 4.10 / 5.22
 // ═══════════════════════════════════════════════════════════════
+
+/**
+ * POST /api/projects/:id/share  { buId }
+ * Share a project with another business unit so that BU's leader can see it.
+ * Idempotent — re-sharing the same BU is a no-op. Requires project-manage
+ * rights + access to the project. Can't share a project with its own BU.
+ */
+router.post("/:id/share", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = shareProjectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user)) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const { buId } = parsed.data;
+  if (buId === ctx.owningBuId) {
+    return res.status(400).json({ error: "Project is already owned by that business unit" });
+  }
+  const bu = await prisma.businessUnit.findUnique({ where: { id: buId }, select: { id: true, isActive: true } });
+  if (!bu) return res.status(404).json({ error: "Business unit not found" });
+  if (!bu.isActive) return res.status(400).json({ error: "Business unit is inactive" });
+
+  // Idempotent create.
+  const existing = await prisma.projectShare.findUnique({
+    where: { projectId_sharedWithBuId: { projectId: ctx.id, sharedWithBuId: buId } },
+  });
+  if (!existing) {
+    await prisma.projectShare.create({ data: { projectId: ctx.id, sharedWithBuId: buId } });
+    await logChanges("Project", ctx.id, user.id, [
+      { field: "shared_with_bu", oldValue: null, newValue: buId },
+    ]);
+  }
+
+  const shares = await prisma.projectShare.findMany({
+    where: { projectId: ctx.id },
+    select: { sharedWithBu: { select: { id: true, code: true, name: true } } },
+  });
+  res.json({ message: "Project shared", sharedWithBus: shares.map((s) => s.sharedWithBu) });
+});
+
+/**
+ * DELETE /api/projects/:id/share/:buId
+ * Stop sharing a project with a business unit. Idempotent.
+ */
+router.delete("/:id/share/:buId", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user)) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+
+  const existing = await prisma.projectShare.findUnique({
+    where: { projectId_sharedWithBuId: { projectId: ctx.id, sharedWithBuId: req.params.buId } },
+  });
+  if (existing) {
+    await prisma.projectShare.delete({ where: { id: existing.id } });
+    await logChanges("Project", ctx.id, user.id, [
+      { field: "shared_with_bu", oldValue: req.params.buId, newValue: null },
+    ]);
+  }
+
+  const shares = await prisma.projectShare.findMany({
+    where: { projectId: ctx.id },
+    select: { sharedWithBu: { select: { id: true, code: true, name: true } } },
+  });
+  res.json({ message: "Share removed", sharedWithBus: shares.map((s) => s.sharedWithBu) });
+});
 
 /**
  * POST /api/projects/:id/assignments

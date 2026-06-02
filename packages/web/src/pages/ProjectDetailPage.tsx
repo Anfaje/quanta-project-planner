@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { ProjectDetail } from "../lib/types";
+import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
 import {
   Card,
@@ -26,6 +27,7 @@ import {
 import { HoursGridPanel } from "../components/HoursGridPanel";
 import { BurnChartPanel } from "../components/BurnChartPanel";
 import { FinancialsPanel } from "../components/FinancialsPanel";
+import { ShareProjectModal } from "../components/ShareProjectModal";
 
 /**
  * Project detail — four-tab view: overview, hours, burn, financials.
@@ -47,6 +49,11 @@ const TABS: { id: Tab; label: string }[] = [
 export function ProjectDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
   const [tab, setTab] = useState<Tab>("overview");
+  const [shareOpen, setShareOpen] = useState(false);
+  const me = useMe();
+  // Sharing is sourced from the BUL/AA-gated BU list, so only those roles
+  // get the management control (matches TC 4.10/5.22's BUL framing).
+  const canShare = me.roles.includes("BUL") || me.roles.includes("AA");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["project", id],
@@ -94,6 +101,11 @@ export function ProjectDetailPage() {
         subtitle={`${p.projectCode} · ${p.account.name} · ${p.owningBu.name}`}
         actions={
           <>
+            {canShare && p.status !== "archived" && (
+              <Button variant="secondary" size="sm" onClick={() => setShareOpen(true)}>
+                Manage sharing
+              </Button>
+            )}
             <Button variant="secondary" size="sm" onClick={exportCsv}>
               Export CSV
             </Button>
@@ -125,6 +137,16 @@ export function ProjectDetailPage() {
           Contingency {formatPercent(p.contingencyPct * 100)}
         </div>
       </div>
+
+      {canShare && (
+        <ShareProjectModal
+          projectId={id}
+          owningBuId={p.owningBu.id}
+          sharedWithBus={p.sharedWithBus}
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
 
       {/* ── Summary metrics ── */}
       <SummaryMetrics data={data} />

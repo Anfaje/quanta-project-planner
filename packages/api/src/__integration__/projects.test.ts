@@ -280,3 +280,74 @@ describe("GET /api/projects/:id", () => {
     expect(firstAssignment?.costRate).toBeUndefined();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// Project sharing (TC 4.10 / 5.22)
+// ═══════════════════════════════════════════════════════════════
+
+describe("Project sharing", () => {
+  async function seedShareScenario() {
+    const bu = await getDefaultBu(prisma); // BU-A (owner)
+    const buB = await prisma.businessUnit.findUnique({ where: { code: "BU-B" } });
+    const account = await getDefaultAccount(prisma);
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const pm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const project = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: pm.id,
+      assignments: [{ userId: pm.id, projectRole: "PM" }],
+    });
+    return { bu, buB: buB!, account, bul, pm, project };
+  }
+
+  it("BUL shares a project with another BU; it becomes visible to that BU's leader", async () => {
+    const { bul, buB, project } = await seedShareScenario();
+
+    const bulAgent = await authenticateAs(app, bul.email);
+    const res = await bulAgent.post(`/api/projects/${project.id}/share`).send({ buId: buB.id });
+    expect(res.status).toBe(200);
+    expect(res.body.sharedWithBus.map((b: { code: string }) => b.code)).toContain("BU-B");
+
+    // A BUL in BU-B can now see the shared project in their list.
+    const buBLeader = await seedUser(prisma, { buId: buB.id, roles: ["BUL"] });
+    const otherAgent = await authenticateAs(app, buBLeader.email);
+    const list = await otherAgent.get("/api/projects").expect(200);
+    expect(list.body.projects.map((p: { id: string }) => p.id)).toContain(project.id);
+  });
+
+  it("sharing is idempotent", async () => {
+    const { bul, buB, project } = await seedShareScenario();
+    const bulAgent = await authenticateAs(app, bul.email);
+    await bulAgent.post(`/api/projects/${project.id}/share`).send({ buId: buB.id }).expect(200);
+    await bulAgent.post(`/api/projects/${project.id}/share`).send({ buId: buB.id }).expect(200);
+    const count = await prisma.projectShare.count({ where: { projectId: project.id } });
+    expect(count).toBe(1);
+  });
+
+  it("400 when sharing with the owning BU", async () => {
+    const { bu, bul, project } = await seedShareScenario();
+    const bulAgent = await authenticateAs(app, bul.email);
+    const res = await bulAgent.post(`/api/projects/${project.id}/share`).send({ buId: bu.id });
+    expect(res.status).toBe(400);
+  });
+
+  it("unshare removes the share", async () => {
+    const { bul, buB, project } = await seedShareScenario();
+    const bulAgent = await authenticateAs(app, bul.email);
+    await bulAgent.post(`/api/projects/${project.id}/share`).send({ buId: buB.id }).expect(200);
+    const res = await bulAgent.delete(`/api/projects/${project.id}/share/${buB.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.sharedWithBus).toEqual([]);
+    const count = await prisma.projectShare.count({ where: { projectId: project.id } });
+    expect(count).toBe(0);
+  });
+
+  it("403 when an IC tries to share", async () => {
+    const { bu, buB, project } = await seedShareScenario();
+    const ic = await seedUser(prisma, { buId: bu.id });
+    const icAgent = await authenticateAs(app, ic.email);
+    const res = await icAgent.post(`/api/projects/${project.id}/share`).send({ buId: buB.id });
+    expect(res.status).toBe(403);
+  });
+});
