@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, memo } from "react";
+import { useState, useMemo, useCallback, useRef, memo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { HoursGrid, HoursEntry } from "../lib/types";
@@ -26,6 +26,16 @@ type PendingCell = {
   projectWeek: number;
   plannedHours?: number | null;
   actualHours?: number | null;
+};
+
+// Shape of the /hours/import response.
+type ImportReport = {
+  message: string;
+  cellsUpdated: number;
+  matchedResources: number;
+  unmatched: string[];
+  weeksOutOfRange: string[];
+  skippedLocked: { resourceAssignmentId: string; week: number }[];
 };
 
 // We keep a pending-edits map keyed by "assignmentId|week|field" so multiple
@@ -136,6 +146,40 @@ export function HoursGridPanel({ projectId }: Props) {
     },
   });
 
+  // ── CSV import ──
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importResult, setImportResult] = useState<ImportReport | null>(null);
+
+  const importMutation = useMutation({
+    mutationFn: (csv: string) =>
+      api.post<ImportReport>(`/api/projects/${projectId}/hours/import`, { csv }),
+    onSuccess: (res) => {
+      setImportResult(res);
+      setToast({
+        tone: "emerald",
+        text: `Imported ${res.cellsUpdated} cell${res.cellsUpdated === 1 ? "" : "s"}`,
+      });
+      qc.invalidateQueries({ queryKey: ["project", projectId, "hours"] });
+    },
+    onError: (err) => {
+      setToast({ tone: "rose", text: err instanceof ApiError ? err.message : "Import failed" });
+    },
+  });
+
+  const onFilePicked = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      // Reset the input so picking the same file again still fires onChange.
+      e.target.value = "";
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => importMutation.mutate(String(reader.result ?? ""));
+      reader.onerror = () => setToast({ tone: "rose", text: "Couldn't read that file" });
+      reader.readAsText(file);
+    },
+    [importMutation]
+  );
+
   // ── Rendering ──
 
   if (isLoading) {
@@ -168,6 +212,26 @@ export function HoursGridPanel({ projectId }: Props) {
         </div>
         {canEdit && (
           <div className="flex gap-2">
+            {capabilities.canManagePlan && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={onFilePicked}
+                  aria-hidden="true"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  loading={importMutation.isPending}
+                >
+                  Import CSV
+                </Button>
+              </>
+            )}
             {pending.size > 0 && (
               <Button
                 variant="ghost"
@@ -193,6 +257,48 @@ export function HoursGridPanel({ projectId }: Props) {
       {toast && (
         <div className="mb-3" aria-live="polite" aria-atomic="true">
           <Alert tone={toast.tone}>{toast.text}</Alert>
+        </div>
+      )}
+
+      {importResult && (
+        <div className="mb-3">
+          <Alert tone={importResult.unmatched.length > 0 ? "amber" : "emerald"}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="text-sm">
+                <div className="font-medium">
+                  Imported {importResult.cellsUpdated} cell
+                  {importResult.cellsUpdated === 1 ? "" : "s"} across{" "}
+                  {importResult.matchedResources} resource
+                  {importResult.matchedResources === 1 ? "" : "s"}.
+                </div>
+                {importResult.unmatched.length > 0 && (
+                  <div className="mt-1 text-amber-700">
+                    Skipped {importResult.unmatched.length} unmatched row
+                    {importResult.unmatched.length === 1 ? "" : "s"}:{" "}
+                    {importResult.unmatched.join(", ")}
+                  </div>
+                )}
+                {importResult.weeksOutOfRange.length > 0 && (
+                  <div className="mt-1 text-gray-600">
+                    Ignored out-of-range week columns: {importResult.weeksOutOfRange.join(", ")}
+                  </div>
+                )}
+                {importResult.skippedLocked.length > 0 && (
+                  <div className="mt-1 text-gray-600">
+                    Skipped {importResult.skippedLocked.length} locked cell
+                    {importResult.skippedLocked.length === 1 ? "" : "s"}.
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setImportResult(null)}
+                className="text-xs text-gray-400 hover:text-gray-600 shrink-0"
+                aria-label="Dismiss import summary"
+              >
+                Dismiss
+              </button>
+            </div>
+          </Alert>
         </div>
       )}
 

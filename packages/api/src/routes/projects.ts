@@ -34,6 +34,7 @@ import {
   createAssignmentSchema,
   updateAssignmentSchema,
   hoursBatchSchema,
+  hoursImportSchema,
   unlockWeekSchema,
 } from "../utils/validation";
 
@@ -876,6 +877,182 @@ router.put("/:id/hours", async (req: Request, res: Response) => {
   });
 });
 
+/**
+ * POST /api/projects/:id/hours/import
+ * Bulk-import actual hours from CSV (TC 3.17/3.18/8.6).
+ *
+ * Expected CSV: a header row whose first column is the resource (matched by
+ * name or email, case-insensitive) and whose remaining columns are week
+ * labels — "W1", "Week 1", or just "1" (1-based; mapped to 0-based
+ * projectWeek). Each data row supplies that resource's actual hours per week:
+ *
+ *   Resource,W1,W2,W3,W4
+ *   Maya Chen,8,8,7.5,8
+ *   alex@trifork.com,40,40,40,40
+ *
+ * Behaviour:
+ *   - Rows whose resource doesn't match a project assignment are skipped and
+ *     reported in `unmatched` (TC 3.18). UTF-8 names match natively (TC 8.6).
+ *   - Week columns outside the project range are ignored and reported.
+ *   - Locked (assignment, week) cells are skipped and reported, not fatal.
+ *   - Blank/non-numeric cells are left untouched.
+ *
+ * Importing writes ON BEHALF of the team, so it requires the plan-management
+ * capability (PM/AC/BUL). ICs get 403.
+ */
+router.post("/:id/hours/import", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = hoursImportSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+  if (!canManagePlan(user)) {
+    return res.status(403).json({ error: "Importing hours requires a PM, AC, or BUL role" });
+  }
+  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+
+  const rows = parseCsv(parsed.data.csv);
+  if (rows.length < 2) {
+    return res.status(400).json({ error: "CSV needs a header row and at least one data row" });
+  }
+
+  const totalWeeks = countProjectWeeks(ctx.startDate, ctx.endDate);
+
+  // ── Header → week-column map ──
+  const header = rows[0];
+  const weekCols: { colIndex: number; projectWeek: number; label: string }[] = [];
+  const weeksOutOfRange: string[] = [];
+  for (let c = 1; c < header.length; c++) {
+    const label = header[c].trim();
+    if (!label) continue;
+    const m = label.match(/(\d+)/);
+    if (!m) continue;
+    const projectWeek = parseInt(m[1], 10) - 1; // labels are 1-based
+    if (projectWeek < 0 || projectWeek >= totalWeeks) {
+      weeksOutOfRange.push(label);
+      continue;
+    }
+    weekCols.push({ colIndex: c, projectWeek, label });
+  }
+  if (weekCols.length === 0) {
+    return res.status(400).json({
+      error: "No valid week columns found in the header (expected W1, W2, …)",
+      weeksOutOfRange,
+    });
+  }
+
+  // ── Resource matching ──
+  const assignments = await prisma.resourceAssignment.findMany({
+    where: { projectId: ctx.id },
+    select: { id: true, user: { select: { id: true, name: true, email: true } } },
+  });
+  const byName = new Map<string, string>(); // normalised name → assignmentId
+  const byEmail = new Map<string, string>();
+  for (const a of assignments) {
+    byName.set(a.user.name.trim().toLowerCase(), a.id);
+    byEmail.set(a.user.email.trim().toLowerCase(), a.id);
+  }
+
+  type Upd = { assignmentId: string; projectWeek: number; actualHours: number };
+  const updates: Upd[] = [];
+  const unmatched: string[] = [];
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const key = (row[0] ?? "").trim();
+    if (!key) continue; // skip blank lines
+    const norm = key.toLowerCase();
+    const assignmentId = byEmail.get(norm) ?? byName.get(norm);
+    if (!assignmentId) {
+      unmatched.push(key);
+      continue;
+    }
+    for (const wc of weekCols) {
+      const raw = (row[wc.colIndex] ?? "").trim();
+      if (raw === "") continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || n > 168) continue; // ignore junk cells
+      updates.push({ assignmentId, projectWeek: wc.projectWeek, actualHours: n });
+    }
+  }
+
+  if (updates.length === 0) {
+    return res.json({
+      message: "No matching rows to import",
+      cellsUpdated: 0,
+      matchedResources: 0,
+      unmatched,
+      weeksOutOfRange,
+      skippedLocked: [],
+    });
+  }
+
+  // ── Apply: load existing entries, skip locked, write actuals, audit ──
+  const assignmentIds = [...new Set(updates.map((u) => u.assignmentId))];
+  const projectWeeks = [...new Set(updates.map((u) => u.projectWeek))];
+  const existing = await prisma.hourEntry.findMany({
+    where: { assignmentId: { in: assignmentIds }, projectWeek: { in: projectWeeks } },
+  });
+  const entryMap = new Map(existing.map((e) => [`${e.assignmentId}|${e.projectWeek}`, e]));
+
+  const skippedLocked: { resourceAssignmentId: string; week: number }[] = [];
+  const auditEntries: { entityId: string; oldValue: string | null; newValue: string }[] = [];
+  let cellsUpdated = 0;
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const u of updates) {
+        const entry = entryMap.get(`${u.assignmentId}|${u.projectWeek}`);
+        if (!entry) continue; // week not provisioned (shouldn't happen for in-range weeks)
+        if (entry.locked) {
+          skippedLocked.push({ resourceAssignmentId: u.assignmentId, week: u.projectWeek });
+          continue;
+        }
+        const oldStr = entry.actualHours != null ? String(Number(entry.actualHours)) : null;
+        const newStr = String(u.actualHours);
+        if (oldStr === newStr) continue; // no-op
+        await tx.hourEntry.update({
+          where: { id: entry.id },
+          data: { actualHours: new Prisma.Decimal(u.actualHours) },
+        });
+        auditEntries.push({ entityId: entry.id, oldValue: oldStr, newValue: newStr });
+        cellsUpdated++;
+      }
+    });
+  } catch (err) {
+    logger.error({ err }, "Hours CSV import failed");
+    return res.status(500).json({ error: "Failed to import hours" });
+  }
+
+  if (auditEntries.length > 0) {
+    await prisma.auditLog.createMany({
+      data: auditEntries.map((a) => ({
+        entityType: "HourEntry",
+        entityId: a.entityId,
+        field: "actual_hours",
+        oldValue: a.oldValue,
+        newValue: a.newValue,
+        changedBy: user.id,
+      })),
+    });
+  }
+
+  res.json({
+    message: "Import complete",
+    cellsUpdated,
+    matchedResources: assignmentIds.length,
+    unmatched, // names that didn't match any resource (TC 3.18)
+    weeksOutOfRange, // week labels outside the project span
+    skippedLocked, // (assignment, week) pairs skipped because locked
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════
 // WEEK LOCK / UNLOCK / FILL REMAINING
 // ═══════════════════════════════════════════════════════════════
@@ -1147,6 +1324,63 @@ class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+/**
+ * Minimal CSV parser for the hours import. Handles the parts that matter for
+ * real-world spreadsheet exports: double-quoted fields, escaped quotes ("")
+ * inside them, commas and newlines within quotes, and CRLF or LF line
+ * endings. UTF-8 is handled natively by JS strings (TC 8.6). Returns an
+ * array of rows, each an array of cell strings. Trailing blank line ignored.
+ */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"'; // escaped quote
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      // Close the field/row on a line break. Swallow the \n of a \r\n pair.
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field);
+      field = "";
+      rows.push(row);
+      row = [];
+    } else {
+      field += ch;
+    }
+  }
+
+  // Flush the final field/row if the file didn't end with a newline.
+  if (field !== "" || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  // Drop fully-empty rows (e.g. a trailing blank line → [""]).
+  return rows.filter((r) => !(r.length === 1 && r[0].trim() === ""));
 }
 
 export default router;

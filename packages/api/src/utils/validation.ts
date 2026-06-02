@@ -140,3 +140,11 @@ export const hoursBatchSchema = z.object({
 export const unlockWeekSchema = z.object({
   reason: z.string().max(500).optional(),
 });
+
+// CSV bulk import of actual hours (TC 3.17/3.18). The client reads the file
+// and posts its text; we cap the payload so a giant paste can't exhaust
+// memory. Parsing + name-matching happens in the route.
+export const hoursImportSchema = z.object({
+  csv: z.string().min(1, "CSV content is required").max(1_000_000, "CSV too large"),
+});
+
