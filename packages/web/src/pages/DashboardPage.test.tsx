@@ -104,6 +104,10 @@ describe("DashboardPage", () => {
           headcount: { active: 4, target: null },
           atRiskProjectCount: 0,
           totalProjects: 3,
+          trajectory: [
+            { month: "2026-01", headcount: 3, headcountTarget: 5 },
+            { month: "2026-02", headcount: 4, headcountTarget: 5 },
+          ],
         },
       })
     );

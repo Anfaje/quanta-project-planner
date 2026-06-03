@@ -72,6 +72,16 @@ describe("GET /api/dashboard", () => {
 
     expect(res.body.sections).toContain("bu_health");
     expect(res.body.buHealth?.businessUnit?.code).toBe("BU-A");
+
+    // Monthly trajectory: 12 months, headcount fields always present, and
+    // (for a BUL, who sees financials) revenue/profit fields too.
+    const traj = res.body.buHealth?.trajectory;
+    expect(Array.isArray(traj)).toBe(true);
+    expect(traj).toHaveLength(12);
+    expect(traj[0]).toHaveProperty("month");
+    expect(traj[0]).toHaveProperty("headcount");
+    expect(traj[0]).toHaveProperty("revenue");
+    expect(traj[0]).toHaveProperty("profit");
   });
 
   it("AA sees platform_admin with the user / domain / BU counts", async () => {

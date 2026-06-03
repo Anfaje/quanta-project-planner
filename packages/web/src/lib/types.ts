@@ -295,11 +295,22 @@ export interface AccountOverviewRow {
   }>;
 }
 
+export interface BuHealthTrajectoryPoint {
+  month: string; // "2026-01"
+  headcount: number;
+  headcountTarget: number | null;
+  revenue?: number;
+  profit?: number;
+  revenueTarget?: number | null;
+  profitTarget?: number | null;
+}
+
 export interface BuHealth {
   businessUnit: BusinessUnitLite | null;
   headcount: { active: number; target: number | null };
   atRiskProjectCount: number;
   totalProjects: number;
+  trajectory: BuHealthTrajectoryPoint[];
   revenueYtd?: number;
   revenueTarget?: number | null;
   revenueAttainmentPct?: number | null;

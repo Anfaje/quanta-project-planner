@@ -1,7 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 import { api } from "../lib/api";
-import type { Dashboard } from "../lib/types";
+import type { Dashboard, BuHealthTrajectoryPoint } from "../lib/types";
 import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
 import { Card, CardBody, CardHeader, Badge, Spinner, Alert, EmptyState } from "../components/ui";
@@ -391,8 +401,92 @@ function BuHealthSection({ data }: { data: NonNullable<Dashboard["buHealth"]> })
             tone={data.atRiskProjectCount === 0 ? "emerald" : "amber"}
           />
         </div>
+
+        {data.trajectory && data.trajectory.length > 0 && (
+          <BuTrajectory points={data.trajectory} />
+        )}
       </CardBody>
     </Card>
+  );
+}
+
+const MONTH_ABBR = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+function monthLabel(key: string): string {
+  const m = Number(key.split("-")[1]);
+  return MONTH_ABBR[m - 1] ?? key;
+}
+
+/**
+ * Monthly trajectory charts for the BU. Revenue/profit (money) and headcount
+ * are different scales, so they get separate charts. Target series render as
+ * dashed pace lines. The money chart only appears when the API included
+ * financial fields (i.e. the viewer has financial visibility).
+ */
+function BuTrajectory({ points }: { points: BuHealthTrajectoryPoint[] }) {
+  const data = points.map((p) => ({ ...p, label: monthLabel(p.month) }));
+  const hasMoney = points[0]?.revenue !== undefined;
+  const compactMoney = (v: number) =>
+    Math.abs(v) >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`;
+
+  return (
+    <div className="mt-8 space-y-8">
+      {hasMoney && (
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
+            Revenue &amp; profit by month
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data} margin={{ top: 5, right: 16, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={compactMoney} width={48} />
+              <Tooltip formatter={(v: number | string) => formatMoney(Number(v))} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#4f46e5" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="profit" name="Profit" stroke="#059669" strokeWidth={2} dot={false} />
+              <Line
+                type="monotone"
+                dataKey="revenueTarget"
+                name="Revenue target"
+                stroke="#c7cdd4"
+                strokeWidth={2}
+                strokeDasharray="5 4"
+                dot={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">
+          Headcount by month
+        </div>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={data} margin={{ top: 5, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
+            <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
+            <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" allowDecimals={false} width={32} />
+            <Tooltip />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Line type="monotone" dataKey="headcount" name="Contributors" stroke="#4f46e5" strokeWidth={2} dot={{ r: 2 }} />
+            <Line
+              type="monotone"
+              dataKey="headcountTarget"
+              name="Target"
+              stroke="#c7cdd4"
+              strokeWidth={2}
+              strokeDasharray="5 4"
+              dot={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
 

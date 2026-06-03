@@ -240,6 +240,75 @@ async function buildAccountOverviewSection(user: any) {
   };
 }
 
+/**
+ * Monthly trajectory for a BU's current calendar year. Buckets actual hours
+ * into the month of each entry's week-start date, summing revenue
+ * (hours × bill rate) and cost (hours × cost rate), and collecting distinct
+ * contributors per month as a headcount proxy. Monthly targets are the annual
+ * config values / 12 — a flat pace line until a month-by-month plan exists.
+ * Financial fields are included only when the viewer can see financials.
+ */
+function computeMonthlyTrajectory(
+  projects: Array<{
+    assignments: Array<{
+      billRate: unknown;
+      costRate: unknown;
+      userId: string;
+      hourEntries: Array<{ weekStartDate: Date; actualHours: unknown }>;
+    }>;
+  }>,
+  opts: {
+    year: number;
+    revenueTarget: number;
+    marginTarget: number;
+    headcountTarget: number;
+    showFinancials: boolean;
+  }
+) {
+  const months = Array.from({ length: 12 }, (_, m) => ({
+    key: `${opts.year}-${String(m + 1).padStart(2, "0")}`,
+    revenue: 0,
+    cost: 0,
+    contributors: new Set<string>(),
+  }));
+
+  for (const p of projects) {
+    for (const a of p.assignments) {
+      const bill = Number(a.billRate);
+      const cost = Number(a.costRate);
+      for (const e of a.hourEntries) {
+        const d = new Date(e.weekStartDate);
+        if (d.getUTCFullYear() !== opts.year) continue;
+        const actual = e.actualHours == null ? 0 : Number(e.actualHours);
+        if (actual <= 0) continue;
+        const slot = months[d.getUTCMonth()];
+        slot.revenue += actual * bill;
+        slot.cost += actual * cost;
+        slot.contributors.add(a.userId);
+      }
+    }
+  }
+
+  const revTarget = opts.revenueTarget > 0 ? opts.revenueTarget / 12 : null;
+  const profitTarget =
+    opts.revenueTarget > 0 ? (opts.revenueTarget * opts.marginTarget) / 12 : null;
+  const hcTarget = opts.headcountTarget > 0 ? opts.headcountTarget : null;
+
+  return months.map((m) => ({
+    month: m.key,
+    headcount: m.contributors.size,
+    headcountTarget: hcTarget,
+    ...(opts.showFinancials
+      ? {
+          revenue: round2(m.revenue),
+          profit: round2(m.revenue - m.cost),
+          revenueTarget: revTarget != null ? round2(revTarget) : null,
+          profitTarget: profitTarget != null ? round2(profitTarget) : null,
+        }
+      : {}),
+  }));
+}
+
 async function buildBuHealthSection(user: any) {
   const buId = user.primaryBuId;
 
@@ -314,6 +383,21 @@ async function buildBuHealthSection(user: any) {
     atRiskProjectCount: atRiskCount,
     totalProjects: projects.length,
   };
+
+  // Monthly trajectory for the current calendar year, derived from the same
+  // project/hour data already loaded. Revenue/profit are actuals bucketed by
+  // the month each week falls in; headcount is the count of distinct
+  // contributors who logged hours that month. Monthly targets are a flat
+  // pro-rata of the annual config values (a reasonable pace line until a
+  // month-by-month plan exists). Financial series are omitted for viewers
+  // without financial visibility — headcount still shows.
+  result.trajectory = computeMonthlyTrajectory(projects, {
+    year: new Date().getUTCFullYear(),
+    revenueTarget,
+    marginTarget,
+    headcountTarget,
+    showFinancials,
+  });
 
   if (showFinancials) {
     result.revenueYtd = round2(ytdRevenue);
