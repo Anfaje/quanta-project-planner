@@ -19,6 +19,7 @@ import { Button, FormInput, Alert } from "../components/ui";
 
 interface LocationState {
   from?: string;
+  notice?: string;
 }
 
 export function LoginPage() {
@@ -59,6 +60,12 @@ export function LoginPage() {
       <h1 className="text-xl font-semibold text-gray-900 mb-1">Welcome back</h1>
       <p className="text-sm text-gray-500 mb-6">Sign in to continue to Quanta.</p>
 
+      {state?.notice && (
+        <div className="mb-4">
+          <Alert tone="emerald">{state.notice}</Alert>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4">
           <Alert tone="rose">{error}</Alert>
@@ -83,6 +90,14 @@ export function LoginPage() {
           placeholder="••••••••••••"
           required
         />
+        <div className="text-right -mt-1">
+          <Link
+            to="/forgot-password"
+            className="text-xs text-gray-500 hover:text-indigo-600"
+          >
+            Forgot password?
+          </Link>
+        </div>
         <Button type="submit" loading={submitting} className="w-full mt-2">
           Sign in
         </Button>

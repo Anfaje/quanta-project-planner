@@ -21,7 +21,7 @@ Quanta is a project resource estimation and time-tracking platform intended to b
 
 Threats we explicitly defend against:
 
-- **Account compromise via credential stuffing or weak passwords** — login is gated by mandatory TOTP, and password resets are not yet exposed
+- **Account compromise via credential stuffing or weak passwords** — login is gated by mandatory TOTP; the password-reset flow issues short-lived (1h) single-use tokens and never reveals whether an email has an account
 - **Privilege escalation between roles** — every privileged action is enforced server-side by the permission resolver, regardless of UI gating
 - **Financial data leakage to unauthorised roles** — every API response that includes money fields passes through the financial serialiser, which strips columns based on the caller's role and project scope
 - **Cross-tenant data leakage between BUs** — project list, assignments, and hour grids are scoped server-side to the caller's primary BU + shared-with BUs + AA-override
@@ -94,7 +94,7 @@ These are accepted for now and tracked for future drops:
 - **No global rate limit** — Only auth and invite routes are limited. A modest global limit (e.g. 600 req/15min per IP) would mitigate brute-force enumeration on project IDs.
 - **No CAPTCHA on signup / invite accept** — A determined attacker could automate signups against any whitelisted domain. Domain whitelisting limits the blast radius for now.
 - **No SMTP-delivered invites** — Invite tokens are currently returned in the admin `POST /users/invite` response, on the assumption that the inviter shares the link out-of-band. When SMTP is wired up the token should never leave the server.
-- **No password reset** — There is no forgot-password flow. An AA can deactivate and re-invite a user as a workaround.
+- **Reset-token delivery / hardening** — the forgot-password flow exists, but until SMTP is wired the reset link is returned in the API response (dev mode) rather than emailed; reset tokens are also stored raw (like invite tokens) rather than hashed at rest. Both are follow-ups before production.
 - **No SSO / SAML / OIDC** — Planned but not in scope.
 - **No automated dependency scanning in CI** — The project's CI/CD pipeline ships in Drop 5; `npm audit` will be wired up there.
 - **No professional pen test** — A third-party penetration test should run against the Drop 6c build before any non-trivial production deployment.

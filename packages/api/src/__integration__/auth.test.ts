@@ -235,3 +235,94 @@ describe("GET /api/auth/domains", () => {
     expect(res.body.domains).toContain(TEST_DOMAIN);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// Forgot / reset password (TC 1.5)
+// ═══════════════════════════════════════════════════════════════
+
+describe("Password reset", () => {
+  it("issues a reset token for an existing user and the new password works end-to-end", async () => {
+    const bu = await getDefaultBu(prisma);
+    const user = await seedUser(prisma, { buId: bu.id });
+
+    const forgot = await request(app)
+      .post("/api/auth/forgot-password")
+      .send({ email: user.email });
+    expect(forgot.status).toBe(200);
+    expect(forgot.body.resetUrl).toMatch(/^\/reset-password\//);
+
+    const token = forgot.body.resetUrl.split("/reset-password/")[1];
+    const newPassword = "brand-new-pass-9999";
+    const reset = await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token, password: newPassword });
+    expect(reset.status).toBe(200);
+
+    // Old password no longer works…
+    const oldLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: user.email, password: TEST_PASSWORD });
+    expect(oldLogin.status).toBe(401);
+
+    // …new one does (advances to the MFA step).
+    const newLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ email: user.email, password: newPassword });
+    expect(newLogin.status).toBe(200);
+    expect(newLogin.body.status).toBe("mfa_required");
+  });
+
+  it("returns a generic 200 with no resetUrl for an unknown email (no enumeration)", async () => {
+    const res = await request(app)
+      .post("/api/auth/forgot-password")
+      .send({ email: "nobody@example.com" });
+    expect(res.status).toBe(200);
+    expect(res.body.resetUrl).toBeUndefined();
+  });
+
+  it("rejects an invalid reset token", async () => {
+    const res = await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token: "not-a-real-token", password: "another-good-pass" });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a reused (already-consumed) token", async () => {
+    const bu = await getDefaultBu(prisma);
+    const user = await seedUser(prisma, { buId: bu.id });
+    const forgot = await request(app)
+      .post("/api/auth/forgot-password")
+      .send({ email: user.email });
+    const token = forgot.body.resetUrl.split("/reset-password/")[1];
+
+    await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token, password: "first-reset-pass-1" })
+      .expect(200);
+
+    const second = await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token, password: "second-reset-pass-2" });
+    expect(second.status).toBe(400);
+  });
+
+  it("rejects an expired token", async () => {
+    const bu = await getDefaultBu(prisma);
+    const user = await seedUser(prisma, { buId: bu.id });
+    const forgot = await request(app)
+      .post("/api/auth/forgot-password")
+      .send({ email: user.email });
+    const token = forgot.body.resetUrl.split("/reset-password/")[1];
+
+    // Backdate the token's expiry.
+    await prisma.passwordReset.updateMany({
+      where: { token },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const res = await request(app)
+      .post("/api/auth/reset-password")
+      .send({ token, password: "should-not-work-1" });
+    expect(res.status).toBe(400);
+  });
+});

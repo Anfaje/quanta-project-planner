@@ -50,7 +50,7 @@ The visual behaviors the daily spec called for (cell coloring, planned placehold
 
 ### Tier 1 — core flows referenced repeatedly
 - [ ] **CSV import for hours** (TC 3.17 / 3.18 / 8.6) — PM bulk-imports a timesheet; unmatched names flagged & skipped with a report. No endpoint or UI today.
-- [ ] **Forgot-password flow** (TC 1.5; also a known `SECURITY.md` gap) — needs SES/SMTP, a reset-token model, and the reset pages. Currently the only recovery is AA deactivate + re-invite.
+- [x] ~~**Forgot-password flow** (TC 1.5).~~ Shipped in Drop 7d. `POST /api/auth/forgot-password` issues a 1-hour single-use token (generic response, no enumeration); `POST /api/auth/reset-password` consumes it. Until SMTP exists the reset link is returned dev-mode-style (like invites). New `ForgotPasswordPage` + `ResetPasswordPage`, "Forgot password?" link on login. `PasswordReset` model added. (Token email delivery + hashing-at-rest tracked in SECURITY.md.)
 - [ ] **Post-signup Welcome screen** (TC 1.19 / 1.20) — role-badge confirmation with a context-appropriate CTA ("Go to dashboard" vs "Go to project").
 - [ ] **Monthly trajectory charts with real data** (BUL TC 2.5/2.6/2.7) — `GlobalConfig` holds *yearly* targets only; there's no monthly target/actual series feeding the revenue/profit/headcount trajectory charts. They'll be empty or stubbed until a data source exists.
 - [ ] **Project sharing UI** (TC 4.10 / 5.22) — the `ProjectShare` model exists; the BUL-facing "share with another BU" action + the "Shared" badge need building.

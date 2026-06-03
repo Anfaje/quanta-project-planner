@@ -54,6 +54,7 @@ model User {
   auditLogs        AuditLog[]       @relation("AuditActor")
   domainsAdded     DomainWhitelist[] @relation("DomainAdder")
   invitesSent      UserInvite[]     @relation("InviteSender")
+  passwordResets   PasswordReset[]
 
   @@index([primaryBuId])
   @@map("users")
@@ -245,4 +246,22 @@ model UserInvite {
   @@index([email])
   @@index([expiresAt])
   @@map("user_invites")
+}
+
+/// Password-reset tokens. A user requesting a reset gets a short-lived,
+/// single-use token; resetting consumes it (usedAt set) and any other
+/// outstanding tokens for that user are cleared. Tokens are random and
+/// URL-safe; matching the invite pattern they're stored raw with a short
+/// expiry (hashing-at-rest is a hardening follow-up).
+model PasswordReset {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("password_resets")
 }

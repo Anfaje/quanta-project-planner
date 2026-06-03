@@ -153,3 +153,14 @@ export const shareProjectSchema = z.object({
   buId: z.string().uuid(),
 });
 
+// Password reset (TC 1.5). Request takes just an email; the reset takes the
+// token + a new password held to the same 8-char minimum as registration.
+export const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8, "Password must be at least 8 characters").max(100),
+});
+

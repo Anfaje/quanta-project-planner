@@ -60,6 +60,7 @@ export async function resetMutableTables(prisma: PrismaClient): Promise<void> {
     prisma.projectShare.deleteMany(),
     prisma.project.deleteMany(),
     prisma.userInvite.deleteMany(),
+    prisma.passwordReset.deleteMany(),
     prisma.accountManager.deleteMany(),
     // Keep the AA bootstrap user (aa@example.com) so the domain whitelist
     // FK isn't violated; delete everyone else.

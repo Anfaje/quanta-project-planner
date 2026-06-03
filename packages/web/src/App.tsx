@@ -6,6 +6,8 @@ import { LoginPage, MfaVerifyPage } from "./pages/LoginPage";
 import { MfaSetupPage } from "./pages/MfaSetupPage";
 import { SignupPage } from "./pages/SignupPage";
 import { WelcomePage } from "./pages/WelcomePage";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsListPage } from "./pages/ProjectsListPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
@@ -68,6 +70,8 @@ export default function App() {
           <Route path="/login/mfa-setup" element={<MfaSetupPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/welcome" element={<WelcomePage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
           <Route path="/invite/:token" element={<AcceptInvitePage />} />
 
           {/* ── Protected app routes ── */}
