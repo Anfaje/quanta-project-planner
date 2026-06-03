@@ -49,11 +49,11 @@ The visual behaviors the daily spec called for (cell coloring, planned placehold
 ## 📋 Gap backlog — specified but not yet implemented (ranked)
 
 ### Tier 1 — core flows referenced repeatedly
-- [ ] **CSV import for hours** (TC 3.17 / 3.18 / 8.6) — PM bulk-imports a timesheet; unmatched names flagged & skipped with a report. No endpoint or UI today.
+- [x] ~~**CSV import for hours** (TC 3.17 / 3.18 / 8.6).~~ Shipped in Drop 7b. POST /api/projects/:id/hours/import parses a wide CSV (resource + week columns), matches by email/name, reports unmatched rows and out-of-range/locked cells, writes actuals with audit. PM/AC/BUL only. Upload UI + result summary in HoursGridPanel.
 - [x] ~~**Forgot-password flow** (TC 1.5).~~ Shipped in Drop 7d. `POST /api/auth/forgot-password` issues a 1-hour single-use token (generic response, no enumeration); `POST /api/auth/reset-password` consumes it. Until SMTP exists the reset link is returned dev-mode-style (like invites). New `ForgotPasswordPage` + `ResetPasswordPage`, "Forgot password?" link on login. `PasswordReset` model added. (Token email delivery + hashing-at-rest tracked in SECURITY.md.)
-- [ ] **Post-signup Welcome screen** (TC 1.19 / 1.20) — role-badge confirmation with a context-appropriate CTA ("Go to dashboard" vs "Go to project").
+- [x] ~~**Post-signup Welcome screen** (TC 1.19 / 1.20).~~ Shipped in Drop 7a. /welcome shown once after first-time MFA enrollment, with direct-signup and invite variants, IC badge, and a Go-to-dashboard CTA. (Invites are BU-scoped, so "Go to project" resolves to the dashboard.)
 - [x] ~~**Monthly trajectory charts with real data** (BUL TC 2.5/2.6/2.7).~~ Shipped in Drop 7e. `buildBuHealthSection` now derives a 12-month series from the BU's project hours: monthly revenue (hours × bill rate) and profit (− cost) bucketed by week-start month, plus a distinct-contributor headcount per month. Monthly targets are a flat pro-rata of the annual `GlobalConfig` values (revenue/12, profit = revenue × margin /12, flat headcount). The dashboard renders a revenue/profit line chart (financial-visibility gated) and a headcount line chart, each with a dashed target pace line. (A genuine month-by-month plan/headcount-snapshot source remains a future enhancement; the actuals are real today.)
-- [ ] **Project sharing UI** (TC 4.10 / 5.22) — the `ProjectShare` model exists; the BUL-facing "share with another BU" action + the "Shared" badge need building.
+- [x] ~~**Project sharing UI** (TC 4.10 / 5.22).~~ Shipped in Drop 7c. POST/DELETE /:id/share endpoints (idempotent, owner/inactive guards, audited) + ShareProjectModal and a BUL/AA "Manage sharing" action; the "Shared with" badge already existed.
 
 ### Tier 2 — meaningful but narrower
 - [ ] **Remember-me** (TC 1.6) — persist session across browser restart within the 8h TTL.
