@@ -84,6 +84,12 @@ jobs:
 
     env:
       TEST_DATABASE_URL: postgresql://quanta_test:test@localhost:5432/quanta_test
+      # globalSetup + helpers call encryptSecret(), which requires a >=32-char
+      # TOTP_ENCRYPTION_KEY (it throws otherwise). SESSION_SECRET/WEB_URL have
+      # fallbacks in createApp but we pin them for deterministic test behaviour.
+      TOTP_ENCRYPTION_KEY: test-encryption-key-at-least-32c
+      SESSION_SECRET: test-session-secret-for-ci-only
+      WEB_URL: http://localhost:5173
       # No Redis service: the integration tests use the default in-memory
       # session store via createApp's default sessionStore.
 

@@ -40,7 +40,8 @@ describe("TOTP generation and verification", () => {
     expect(secret.length).toBeGreaterThan(10);
     expect(uri).toContain("otpauth://totp/");
     expect(uri).toContain("Quanta");
-    expect(uri).toContain("test@trifork.com");
+    // otpauth encodes the label in the URI (@ -> %40); decode before checking.
+    expect(decodeURIComponent(uri)).toContain("test@trifork.com");
   });
 
   it("verifies a valid TOTP code", () => {
