@@ -141,12 +141,11 @@ export async function seedProject(prisma: PrismaClient, opts: SeedProjectOpts) {
       projectCode: opts.projectCode ?? `P-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
       accountId: opts.accountId,
       owningBuId: opts.owningBuId,
-      createdBy: opts.createdBy,
+      createdById: opts.createdBy,
       status: opts.status ?? "active",
       startDate,
       endDate,
       contingencyPct: opts.contingencyPct ?? 0.15,
-      totalWeeks,
     },
   });
 
@@ -159,6 +158,7 @@ export async function seedProject(prisma: PrismaClient, opts: SeedProjectOpts) {
           projectRole: a.projectRole,
           billRate: a.billRate ?? 175,
           costRate: a.costRate ?? 90,
+          businessUnit: "TEST-BU",
         },
       });
 
@@ -168,9 +168,8 @@ export async function seedProject(prisma: PrismaClient, opts: SeedProjectOpts) {
           await prisma.hourEntry.create({
             data: {
               assignmentId: assignment.id,
-              projectId: project.id,
-              userId: a.userId,
               projectWeek: w,
+              weekStartDate: new Date(startDate.getTime() + w * 7 * 86_400_000),
               plannedHours: opts.seedHours.plannedPerWeek ?? 0,
               actualHours: opts.seedHours.actualPerWeek ?? 0,
               locked: false,

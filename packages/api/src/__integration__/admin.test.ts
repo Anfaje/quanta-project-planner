@@ -83,7 +83,7 @@ describe("PUT /api/admin/users/:id/roles", () => {
 
     const audit = await prisma.auditLog.findFirst({
       where: { entityId: ic.id, entityType: "User", field: "roles" },
-      orderBy: { createdAt: "desc" },
+      orderBy: { changedAt: "desc" },
     });
     expect(audit).not.toBeNull();
     expect(audit?.newValue).toContain("PM");

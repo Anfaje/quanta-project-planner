@@ -17,6 +17,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    // In CI also emit the github-actions reporter so individual test
+    // failures surface as workflow annotations (not just buried in the
+    // step log). Local runs keep the default reporter only.
+    reporters: process.env.GITHUB_ACTIONS ? ["default", "github-actions"] : ["default"],
     include: ["src/__integration__/**/*.test.ts"],
     globalSetup: ["src/__integration__/globalSetup.ts"],
     pool: "forks",

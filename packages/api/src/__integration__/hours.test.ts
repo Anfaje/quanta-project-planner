@@ -140,7 +140,7 @@ describe("PUT /api/projects/:id/hours", () => {
     const { pm, project, icAssignment } = await seedScenario();
     // Lock week 0 directly in the DB.
     await prisma.hourEntry.updateMany({
-      where: { projectId: project.id, projectWeek: 0 },
+      where: { assignment: { projectId: project.id }, projectWeek: 0 },
       data: { locked: true },
     });
 
@@ -174,7 +174,7 @@ describe("POST /api/projects/:id/weeks/:week/lock + /unlock", () => {
     await pmAgent.post(`/api/projects/${project.id}/weeks/0/lock`).expect(200);
 
     const entries = await prisma.hourEntry.findMany({
-      where: { projectId: project.id, projectWeek: 0 },
+      where: { assignment: { projectId: project.id }, projectWeek: 0 },
     });
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((e: { locked: boolean }) => e.locked)).toBe(true);
@@ -191,8 +191,8 @@ describe("POST /api/projects/:id/weeks/:week/lock + /unlock", () => {
       .expect(200);
 
     const audit = await prisma.auditLog.findFirst({
-      where: { entityType: "Project", action: "unlock_week" },
-      orderBy: { createdAt: "desc" },
+      where: { entityType: "HourEntry", field: "locked" },
+      orderBy: { changedAt: "desc" },
     });
     expect(audit).not.toBeNull();
     expect(audit?.newValue).toContain("Client requested");
@@ -224,7 +224,7 @@ describe("POST /api/projects/:id/weeks/:week/fill-remaining", () => {
       orderBy: { projectWeek: "asc" },
     });
     expect(filled.length).toBe(2);
-    expect(filled.every((e: { actualHours: number | null }) => (e.actualHours ?? 0) > 0)).toBe(true);
+    expect(filled.every((e) => Number(e.actualHours ?? 0) > 0)).toBe(true);
   });
 });
 
@@ -250,7 +250,7 @@ describe("POST /api/projects/:id/hours/import", () => {
       where: { assignmentId: icAssignment.id, projectWeek: { in: [0, 1, 2] } },
       orderBy: { projectWeek: "asc" },
     });
-    expect(entries.map((e: { actualHours: number | null }) => Number(e.actualHours))).toEqual([
+    expect(entries.map((e) => Number(e.actualHours))).toEqual([
       8, 7.5, 8,
     ]);
   });
