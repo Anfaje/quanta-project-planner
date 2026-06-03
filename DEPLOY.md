@@ -1,12 +1,10 @@
 # Deploying Quanta to Fly.io
 
-This walks you through getting Quanta running on Fly.io for end-to-end testing. You'll do most of it in the **Fly dashboard UI** — no CLI install needed. The actual deploys are handled by the **GitHub Actions workflows** from Drop 5b. You touch a few buttons once, then every push to `main` deploys automatically.
+This walks you through getting Quanta running on Fly.io for end-to-end testing. Provisioning is done from the **Fly CLI (`flyctl`)** — Fly moved both Postgres and Redis creation to the CLI, so there's no longer a pure point-and-click path. The ongoing **deploys** are still fully automated by the **GitHub Actions workflows** (Drop 5b): you wire things up once, then every push to `main` that touches `packages/api/**` or `packages/web/**` deploys that app automatically.
 
 **Time:** 15–25 minutes the first time.
-**Cost:** $0 on Fly's free tier. You'll need a credit card on file (fraud check); you won't be charged unless you scale up.
-**Prerequisites:** A Fly account, a credit card linked, push access to this GitHub repo.
-
-> **Don't have flyctl installed and don't want to install it?** Good news — you don't need to. Everything in this guide is point-and-click or copy-paste. The only optional CLI moment is generating two random hex strings in step 2, and the doc covers non-CLI alternatives.
+**Cost:** Fly no longer has a blanket free tier. An always-on test setup (two small app machines kept warm, a tiny unmanaged Postgres, and a free-allowance Redis) runs on the order of a few dollars a month. You can cut that by letting the app machines scale to zero (see the note in step 1a). A credit card must be on file. Check current pricing at https://fly.io/docs/about/pricing/.
+**Prerequisites:** A Fly account with a card linked, push access to this GitHub repo, and `flyctl` installed (step 0).
 
 ---
 
@@ -36,198 +34,206 @@ This walks you through getting Quanta running on Fly.io for end-to-end testing. 
    └─────────┘ └─────────┘
 ```
 
-Everything lives in one Fly organisation, same region (default: `ord` — Chicago). Cookies are first-party (the SPA and API share an origin via nginx proxy), there's no CORS, and the only public port is `quanta-web.fly.dev`.
+Everything lives in one Fly organisation, same region (default: `ord` — Chicago). Cookies are first-party (the SPA and API share an origin via the nginx proxy), there's no CORS, and the only public port is `quanta-web.fly.dev`.
+
+A note on the two databases:
+- **Postgres** here is **Fly's unmanaged Postgres** (`fly postgres`), which the dashboard now labels **"Legacy."** It's a normal Fly app with tooling on top — cheap and perfectly fine for testing, but **not** a managed service (if it runs out of memory/disk, you fix it). For production, Fly recommends **Managed Postgres (MPG)** — fully managed with HA, backups, and failover — but it starts around $38/month, so it's overkill for an end-to-end test box. Migrating to MPG is parked under "hardening" at the bottom.
+- **Redis** is **Upstash for Redis**, provisioned through Fly. We use it only for session storage.
 
 ---
 
-## 1. Provision the four resources in the Fly dashboard
+## 0. Install flyctl and log in
 
-Open [fly.io/dashboard](https://fly.io/dashboard).
+If you already did this while provisioning Redis, skip ahead.
+
+```bash
+# macOS
+brew install flyctl
+# or any platform:
+curl -L https://fly.io/install.sh | sh
+
+fly auth login   # opens a browser to authenticate
+```
+
+`fly` and `flyctl` are the same binary. Confirm you're logged in and note your org slug (you'll need it in step 4):
+
+```bash
+fly orgs list    # the personal org is usually called "personal"
+```
+
+---
+
+## 1. Provision the four resources
 
 ### 1a. Create the two apps
 
-The "Apps" view lists your apps. Click **Launch an app** (or **Create a new app** — labelling varies).
+```bash
+fly apps create quanta-api
+fly apps create quanta-web
+```
 
-Create **`quanta-api`** first:
-- Name: `quanta-api`
-- Region: `ord` (or pick the closest — but **everything must be in the same region** for free internal networking)
-- When the wizard asks "deploy now" / "launch from Docker", **skip / cancel** — we have no image to deploy yet; the GitHub Actions will push the first image once everything's wired up.
+This just reserves the names/app records — no machines deploy yet (the first image lands later, via GitHub Actions). Both apps must be in the **same organisation** (they talk over Fly's private network), and the `fly.toml` files already pin both to `primary_region = "ord"`.
 
-Then create **`quanta-web`** the same way. Same region.
+> **Cost tip:** the committed `fly.toml` keeps machines warm (`auto_stop_machines = false`, `min_machines_running = 1`) so the test box is always responsive. To minimise spend, set `auto_stop_machines = true` and `min_machines_running = 0` in both `fly.toml` files — the apps then scale to zero when idle and cold-start on the next request.
 
-After this step, both apps appear in your Apps list with status "No machines yet" or similar. That's fine.
+### 1b. Provision Postgres (unmanaged / "Legacy")
 
-### 1b. Provision Postgres
+```bash
+fly postgres create --name quanta-db --region ord \
+  --initial-cluster-size 1 --vm-size shared-cpu-1x --volume-size 3
+```
 
-Sidebar → **Databases** (or **Postgres**) → **Create database**.
+If you run `fly postgres create` with no flags it prompts interactively instead; pick a **single-node / Development** configuration, region `ord`, smallest VM, ~3 GB volume. Wait ~30 seconds for the machine to come up.
 
-- Name: `quanta-db`
-- Region: same as the apps
-- Plan: smallest available (the free tier is something like **Development — shared CPU, 256MB, 1GB storage**; for testing this is plenty)
-- Volume size: 3 GB
-
-Click Create and wait ~30 seconds for the cluster to provision. You'll get a status screen showing the new cluster.
+> The dashboard's database creator now steers you to **Managed Postgres** (the paid, fully-managed option). The command above deliberately creates the cheaper **unmanaged** Postgres, which is the right call for a test deploy and matches what the API's `fly.toml` expects.
 
 ### 1c. Attach Postgres to the API
 
-In the new `quanta-db` cluster's overview, find **Attach an app** (might be under "Connect" or "Apps" tab depending on UI version). Pick `quanta-api` from the dropdown.
+```bash
+fly postgres attach quanta-db --app quanta-api
+```
 
-This single action does three things on your behalf:
-1. Creates a fresh database inside the cluster scoped to this app
-2. Creates a database role with limited permissions
-3. Writes the resulting connection URL as a secret called `DATABASE_URL` on `quanta-api`
+This one action: creates a dedicated database inside the cluster, creates a scoped role, and writes the connection string as a `DATABASE_URL` secret on `quanta-api`. Verify:
 
-**Verify it worked:** go to `quanta-api` → **Secrets** tab. You should see `DATABASE_URL` listed (the value is masked).
+```bash
+fly secrets list --app quanta-api    # should list DATABASE_URL
+```
 
 ### 1d. Provision Upstash Redis
 
-Sidebar → **Databases** (or **Add-ons**) → **Upstash for Redis** → **Create database**.
+Redis is **CLI-only** now — the Fly dashboard has no "Create database" button for it (it just tells you to run this command):
 
-- Name: `quanta-redis`
-- Region: same as the apps (so internal latency is sub-ms)
-- Plan: Free tier (256MB ceiling; we use ~1MB for sessions)
-
-After creation, the cluster overview will show a **connection string** that looks like:
-
-```
-redis://default:LONGRANDOMSTRING@something.upstash.io:port
+```bash
+fly redis create
 ```
 
-**Copy this entire string** — you'll need it in step 2. Treat it like a password (it's effectively one).
+It's interactive. Answer:
+- **Organisation** — the same org as your apps.
+- **Name** — `quanta-redis`. (Name and primary region **can't be changed later**.)
+- **Primary region** — `ord`, same as the apps, so session lookups are sub-millisecond.
+- **Eviction** — **No.** Sessions carry their own TTL; you don't want them evicted out from under logged-in users. (Changeable later.)
+- **Plan** — the smallest / pay-as-you-go (free allowance is plenty; we use ~1 MB).
+
+The connection URL is printed once at the end and looks like `redis://default:LONGSTRING@…upstash.io:6379`. **Copy it.** If you miss it:
+
+```bash
+fly redis status quanta-redis        # re-prints the connection URL
+```
+
+Treat it like a password — it effectively is one. You'll set it as a secret in step 3.
 
 ---
 
 ## 2. Generate two random secrets
 
-Quanta encrypts user TOTP secrets at rest and signs session cookies with HMAC. Both need a 32-byte random key (64 hex characters). **Don't reuse the same value for both** — separate keys means one being compromised doesn't compromise the other.
+Quanta encrypts user TOTP secrets at rest and signs session cookies with HMAC. Each needs its own 32-byte random key (64 hex chars). **Don't reuse the same value for both** — separate keys mean one leak doesn't compromise the other.
 
-Pick whichever generator you find easiest:
-
-**Option A: CLI (if you have one open)**
 ```bash
 openssl rand -hex 32
 # Run twice — once for SESSION_SECRET, once for TOTP_ENCRYPTION_KEY
 ```
 
-**Option B: Browser dev console** (any tab, F12 → Console)
-```javascript
-Array.from(crypto.getRandomValues(new Uint8Array(32)))
-  .map(b => b.toString(16).padStart(2, '0')).join('')
-// Run twice
-```
+No openssl? Any of these also produce 64 hex chars: a browser console —
+`Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b=>b.toString(16).padStart(2,'0')).join('')` —
+or a password manager's generator set to length 64, hex charset. Stash both values in a password manager; you'll paste them in step 3.
 
-**Option C: 1Password / Bitwarden / etc.** — use the password generator, set length 64, character set "hex only" (a-f0-9).
-
-**Option D: Online generator** — search "random hex generator", set length 64. (Avoid this if you can; you don't want your TOTP encryption key in someone's server logs.)
-
-Stash both values somewhere safe (password manager). You'll paste them into Fly in step 3 and won't see them again.
+(If you set the secrets straight from the shell in step 3, you can skip saving them — the inline `$(openssl rand -hex 32)` form generates them on the spot.)
 
 ---
 
 ## 3. Set the API app's secrets
 
-`quanta-api` → **Secrets** tab → **New secret**.
+In one command (the inline `openssl` calls fill in the two random keys):
 
-Add each of these (one at a time, click Save between each):
-
-| Name | Value |
-|------|-------|
-| `SESSION_SECRET` | First hex string from step 2 |
-| `TOTP_ENCRYPTION_KEY` | Second hex string from step 2 |
-| `REDIS_URL` | The full `redis://default:...@...upstash.io:port` string from step 1d |
-| `WEB_URL` | `https://quanta-web.fly.dev` |
-
-`DATABASE_URL` is already there from step 1c.
-
-After all five are saved, the Secrets tab should show:
-
-```
-DATABASE_URL          ✓ set
-REDIS_URL             ✓ set
-SESSION_SECRET        ✓ set
-TOTP_ENCRYPTION_KEY   ✓ set
-WEB_URL               ✓ set
+```bash
+fly secrets set --app quanta-api \
+  SESSION_SECRET="$(openssl rand -hex 32)" \
+  TOTP_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+  REDIS_URL="redis://default:...@...upstash.io:6379" \
+  WEB_URL="https://quanta-web.fly.dev"
 ```
 
-> **Don't set anything on `quanta-web`.** The web app reads its only environment value (`API_INTERNAL_URL`) from `fly.toml` directly, no secrets needed.
+Replace `REDIS_URL` with the full string from step 1d. `DATABASE_URL` is already set from the attach in step 1c. Confirm all five:
+
+```bash
+fly secrets list --app quanta-api
+# DATABASE_URL, REDIS_URL, SESSION_SECRET, TOTP_ENCRYPTION_KEY, WEB_URL
+```
+
+> **Don't set anything on `quanta-web`.** The web app reads its one environment value (`API_INTERNAL_URL`) straight from its `fly.toml`; no secrets needed.
+
+Setting secrets on an app with no machines yet is fine — Fly stores them and injects them on the first deploy.
 
 ---
 
-## 4. Create a Fly deploy token + paste it into GitHub
+## 4. Create a Fly deploy token + add it to GitHub
 
-### 4a. Mint the Fly token
+### 4a. Mint an **org-scoped** token
 
-In the Fly dashboard:
+Both apps deploy using the same `FLY_API_TOKEN`, so the token must cover the whole organisation. A plain deploy token is scoped to a **single app** and would only authorise one of the two — use an org token instead:
 
-- Top-right **account menu** (your avatar) → **Access Tokens** (may also be labelled **API Tokens** or **Personal Access Tokens** depending on the version)
-- Click **Create a deploy token** (or **New token** → scope: deploy)
-- Name: anything descriptive — `github-actions-deploy` works
-- Expiry: 1 year (or your preferred lifetime)
-- Click Create
+```bash
+fly tokens create org <your-org-slug>     # e.g. personal — from `fly orgs list`
+```
 
-The next page shows a `FlyV1 ...` token string. **Copy the entire thing including the `FlyV1 ` prefix.** This is the only time you'll see it.
+(If `create org` isn't recognised on an older flyctl, `fly tokens org <org>` is the equivalent; `fly tokens create --help` lists the forms.)
 
-### 4b. Add as a GitHub secret
+Copy the **entire** output, including the `FlyV1 ` prefix and the space. This is the only time it's shown.
 
-Open [github.com/Anfaje/quanta-project-planner/settings/secrets/actions](https://github.com/Anfaje/quanta-project-planner/settings/secrets/actions).
+> Prefer the dashboard? **Account menu → Tokens** can also mint an org token. The CLI is more reliable since the dashboard's token UI labels shift between versions.
+
+### 4b. Add it as a GitHub secret
+
+Open https://github.com/Anfaje/quanta-project-planner/settings/secrets/actions
 
 - **New repository secret**
-- Name: `FLY_API_TOKEN` (exact — case sensitive, no quotes)
-- Value: paste the `FlyV1 ...` token from 4a
+- Name: `FLY_API_TOKEN` (exact — case-sensitive, no quotes)
+- Value: paste the `FlyV1 …` token
 - **Add secret**
 
-The list now shows `FLY_API_TOKEN` with a timestamp. The value is masked forever — to rotate, generate a new Fly token and update the secret.
+To rotate later: mint a new token, update this secret, and revoke the old one (`fly tokens list` / `fly tokens revoke`).
 
 ---
 
 ## 5. Trigger the first deploy
 
-The GitHub Actions workflows only trigger on file changes inside `packages/api/**` or `packages/web/**`. To kick off the first deploy, make a no-op change to each.
+The workflows only run when files under `packages/api/**` or `packages/web/**` change. Two ways to kick off the first deploy:
 
-**Easiest path — edit in the GitHub UI:**
+**Option A — `workflow_dispatch` (no commit):** if the workflows expose a manual trigger, go to https://github.com/Anfaje/quanta-project-planner/actions, pick each workflow, and click **Run workflow**.
 
-1. Open [packages/api/Dockerfile](https://github.com/Anfaje/quanta-project-planner/edit/main/packages/api/Dockerfile)
-2. Add a trailing newline at the very end of the file (or change a comment text — anything trivial)
-3. Commit directly to `main` with a message like `chore: trigger first deploy`
-4. Repeat for [packages/web/Dockerfile](https://github.com/Anfaje/quanta-project-planner/edit/main/packages/web/Dockerfile)
+**Option B — a trivial commit to each package:**
+1. Edit https://github.com/Anfaje/quanta-project-planner/edit/main/packages/api/Dockerfile and add a trailing newline (or tweak a comment).
+2. Commit to `main` with a message like `chore: trigger first deploy`.
+3. Repeat for `packages/web/Dockerfile`.
 
-**Watch them run:** [github.com/Anfaje/quanta-project-planner/actions](https://github.com/Anfaje/quanta-project-planner/actions)
+**Watch them:** https://github.com/Anfaje/quanta-project-planner/actions — you'll see one run per package. Each runs CI (typecheck + tests, plus Postgres-backed integration for the API) and then the deploy job.
 
-You should see two workflow runs (one per package). Each runs CI first (typecheck + tests + integration for the API) and then the deploy job.
-
-Expected timings:
 | Workflow | CI | Deploy | Total |
 |----------|----|--------|-------|
-| API | ~3 min (unit + Postgres-backed integration) | ~90 sec | ~4–5 min |
+| API | ~3 min (unit + integration) | ~90 sec | ~4–5 min |
 | Web | ~1 min (typecheck + vitest + vite build) | ~60 sec | ~2 min |
 
-When both go green, your apps are live.
+On the API deploy, Fly runs the release command `npx prisma db push --skip-generate --accept-data-loss` against the attached Postgres to sync the schema **before** the new image goes live. If that fails, the deploy aborts and the previous version keeps serving.
 
 **Verify the API:**
 ```
 https://quanta-api.fly.dev/api/health
 ```
-Should return JSON like `{"status":"ok","db":"connected","redis":"connected",...}`.
-
-If `db` or `redis` is `disconnected`, see Troubleshooting below.
+Expect JSON like `{"status":"ok","db":"connected","redis":"connected",...}`. If `db` or `redis` is `disconnected`, see Troubleshooting.
 
 ---
 
 ## 6. Seed the bootstrap admin user
 
-You still can't log in — there's no user in the database. The seed script (from Drop 1) creates one bootstrap AA along with sample BUs, accounts, domains, and a small fixture team.
-
-In the Fly dashboard:
-
-- `quanta-api` → **Machines** (or **Overview** → click the running machine row) → look for **Console** / **Open shell** / **Web SSH**
-
-In the shell that opens, run:
+You can't log in yet — the database has no users. The seed script (Drop 1) creates a bootstrap AA plus sample BUs, accounts, domains, and a small fixture team. Run it on the API machine:
 
 ```bash
-npx tsx prisma/seed.ts
+fly ssh console --app quanta-api --command "npx tsx prisma/seed.ts"
 ```
 
-**What gets seeded** (so you know what to expect):
+(Or `fly console --app quanta-api` for an interactive shell, then run `npx tsx prisma/seed.ts`.)
+
+**What gets seeded:**
 
 | | Value |
 |---|---|
@@ -238,130 +244,132 @@ npx tsx prisma/seed.ts
 | Accounts | A few fixture accounts |
 | Sample users | ~13 across the various roles |
 
-> ⚠️ **`quanta123` is a hard-coded dev password.** Log in immediately and change it via the admin console. The seed script lives in source — you should also rotate it to either skip user creation in prod or generate random per-user passwords ([TODO.md](TODO.md) flags this).
+> ⚠️ **`quanta123` is a hard-coded dev password.** Log in immediately and change it via the admin console. The seed lives in source — before any real use, rotate it to skip user creation in prod or generate random per-user passwords ([TODO.md](TODO.md) flags this).
 
 ---
 
 ## 7. Log in
 
-Open `https://quanta-web.fly.dev`. You should see the Quanta login screen.
+1. Open `https://quanta-web.fly.dev`.
+2. Sign in as `sarah@trifork.com` / `quanta123`.
+3. You'll be walked through first-time TOTP enrolment (scan the QR with an authenticator app), then the one-time welcome screen.
+4. You should land on the dashboard.
 
-- Email + password (the bootstrap credentials from step 6)
-- You'll be prompted to set up TOTP — scan the QR with Google Authenticator, 1Password, or any TOTP app
-- Enter the 6-digit code to confirm setup
-- You should land on the dashboard
-
-**First-login checklist:**
-1. Open admin console → Users → change your name/password
-2. Add real users via the Invite flow (until SMTP is wired up — TODO.md gap — the invite token is shown to you in the modal; copy the magic link to the new user out-of-band)
-3. Create real BUs, Accounts, projects
-
-You're live.
+If login works end-to-end, the deploy is good.
 
 ---
 
 ## What happens on every subsequent code change
 
-Push to `main` → GitHub Actions runs the matching workflow → CI passes → deploy runs → new version goes live. Both happen automatically; you don't run any commands.
+Push to `main`:
+- Touches `packages/api/**` → the **API** workflow runs CI, then deploys `quanta-api` (re-running the `prisma db push` release command).
+- Touches `packages/web/**` → the **Web** workflow runs CI, then deploys `quanta-web`.
+- Touches neither → nothing deploys.
 
-Migration safety: the API workflow runs `npx prisma migrate deploy` as Fly's release command *before* the new image goes live. If a migration fails, the deploy aborts and the previous machine keeps serving. No downtime even on bad migrations — you just get a failed Actions run.
+No manual step. Rollbacks and logs are in the Fly dashboard (or `fly releases` / `fly logs`).
 
 ---
 
 ## Troubleshooting
 
-### CI passes but deploy fails with "no authentication credentials"
-`FLY_API_TOKEN` isn't set on the GitHub repo, or it expired. Re-do step 4.
+### CI passes but deploy fails with "no authentication credentials" / 401
+`FLY_API_TOKEN` isn't set on the repo, or it expired. Re-do step 4.
 
-### Deploy succeeds but `/api/health` returns 503 or `db: "disconnected"`
-The `prisma migrate deploy` release command probably failed. Open the Fly dashboard → `quanta-api` → **Monitoring** / **Live logs** and look for the migration error. Common causes:
-- `DATABASE_URL` is wrong (re-do the postgres attach in step 1c)
-- Migration file conflict — Prisma will say which migration is the culprit
+### The API deploys fine but the **web** deploy fails auth (or vice-versa)
+Classic symptom of an **app-scoped** token. A deploy token only covers one app; both apps share `FLY_API_TOKEN`, so it must be **org-scoped**. Re-mint with `fly tokens create org <org>` (step 4a) and update the GitHub secret.
+
+### Deploy succeeds but `/api/health` shows `db: "disconnected"`
+The `prisma db push` release command likely failed. Check logs:
+```bash
+fly logs --app quanta-api
+```
+Common causes: `DATABASE_URL` missing (re-run `fly postgres attach quanta-db --app quanta-api`), or the Postgres machine is stopped (`fly status --app quanta-db`).
 
 ### Health check shows `redis: "disconnected"`
-- Verify `REDIS_URL` matches what Upstash showed — full string, no truncation
-- Confirm the Upstash instance is in the same region as `quanta-api`
-- Restart the API machine: Fly dashboard → `quanta-api` → Machines → ⋯ menu → Restart
+- Verify `REDIS_URL` is the full, untruncated string (`fly secrets list --app quanta-api` shows it's set; re-set if unsure).
+- Confirm the Redis primary region matches `quanta-api`'s (`fly redis status quanta-redis`).
+- Restart the API: `fly apps restart quanta-api`.
 
-### Web app loads but `/api/me` returns 502 Bad Gateway
-The nginx upstream can't reach the API container. Both apps must be in the **same Fly organisation** (default org, unless you explicitly created another). Check `quanta-api` is actually running: Fly dashboard → `quanta-api` → Machines should show at least one machine in state `started`.
+### Web app loads but `/api/me` returns 502
+The nginx upstream can't reach the API. Both apps must be in the **same Fly organisation**. Confirm the API has a running machine: `fly status --app quanta-api` (expect a machine in state `started`).
 
 ### Cookies don't persist between requests
-- Browser devtools → Application → Cookies → check `connect.sid` has Secure, HttpOnly, SameSite=Strict
-- Confirm the web URL is HTTPS (browsers reject Secure cookies over HTTP)
-- The trust-proxy setting in `createApp` should handle this; if it doesn't, file an issue with browser + cookie details
+Make sure you're hitting `https://quanta-web.fly.dev` (not the API host directly) and that `WEB_URL` on the API matches it. The session cookie is `Secure`+first-party; mismatched origins break it.
 
 ### "Too many attempts. Please try again later." on login
-The rate limiter is firing — limit is 10 attempts per 15 minutes per IP. Wait, or restart the API machine (resets the limiter's memory).
+The auth rate limiter tripped. Wait a minute, or restart the API machine to clear the in-memory window.
 
-### Need to roll back to the previous version
-Fly dashboard → `quanta-api` (or `quanta-web`) → **Image history** (or **Releases**) → click the previous deployment → **Rollback**. Effectively instant.
+### Roll back to the previous version
+```bash
+fly releases --app quanta-api          # list versions
+fly releases rollback --app quanta-api # or pick a version in the dashboard → Releases
+```
 
 ### A workflow is stuck or you need to re-run after fixing a secret
-GitHub Actions tab → click the failed run → **Re-run all jobs** (top right). No code change needed.
+Re-run it from the **Actions** tab (the failed run has a **Re-run jobs** button), or push another trivial commit.
 
 ---
 
 ## Tear it down
 
-If you want to pause spending or start over:
-
-| Resource | Where to delete |
-|----------|----------------|
-| `quanta-web` app | Fly dashboard → `quanta-web` → Settings → Delete app |
-| `quanta-api` app | Fly dashboard → `quanta-api` → Settings → Delete app |
-| `quanta-db` Postgres | Fly dashboard → Databases → `quanta-db` → Settings → Delete |
-| `quanta-redis` Upstash | Fly dashboard → Databases → `quanta-redis` → Settings → Delete |
-| `FLY_API_TOKEN` GitHub secret | github.com/Anfaje/quanta-project-planner/settings/secrets/actions → Delete |
-| The Fly token itself | Fly dashboard → account menu → Access Tokens → Revoke |
-
----
-
-## What's deferred to Drop 5c
-
-This is the minimum viable deploy. Bigger production work is parked in [`TODO.md`](TODO.md) under Drop 5c:
-
-- **Terraform** — declarative provisioning so the above is reproducible from code instead of dashboard clicks
-- **Custom domain + cert** — `quanta.your-company.com` instead of `*.fly.dev`
-- **Staging environment** alongside prod
-- **Observability** — Sentry, structured log aggregation
-- **Backup strategy** beyond Fly's Postgres defaults
-
-When you're ready to harden, that's the list.
-
----
-
-## Appendix: CLI equivalents
-
-For reference if you ever want to drive Fly from a terminal instead of the UI. Everything below is optional.
+To stop spending or start over:
 
 ```bash
-# One-time install
-curl -L https://fly.io/install.sh | sh
-fly auth login
+fly apps destroy quanta-web
+fly apps destroy quanta-api
+fly apps destroy quanta-db        # unmanaged Postgres is just an app
+fly redis destroy quanta-redis
+```
 
-# Steps 1a, 1b, 1c, 1d, 1e
+Then remove the GitHub secret (https://github.com/Anfaje/quanta-project-planner/settings/secrets/actions) and revoke the Fly token (`fly tokens list` → `fly tokens revoke <id>`).
+
+> After teardown, run `fly volumes list` and `fly apps list` to make sure nothing lingers — orphaned volumes still bill. (This matters more if you ever switch to Managed Postgres, which lives **outside** your apps and isn't removed by deleting an app.)
+
+---
+
+## Hardening (deferred — see [`TODO.md`](TODO.md))
+
+This is the minimum viable deploy. Production work parked for later:
+
+- **Migrate to Managed Postgres (MPG)** — swap the unmanaged "Legacy" Postgres for `fly mpg` (HA, automated backups, failover). Costs more; worth it for real data.
+- **Real migrations** — replace the `prisma db push` release command with `prisma migrate deploy` once a `prisma/migrations` history exists (run `npx prisma migrate dev --name init` locally first). `db push` is fine for a test box but won't give you versioned, reviewable schema changes.
+- **Reset-token email + hashing** — wire SMTP so password-reset links are emailed (not returned in the response), and hash reset tokens at rest (see [`SECURITY.md`](SECURITY.md)).
+- **Terraform** — declarative provisioning so all of the above is reproducible from code.
+- **Custom domain + cert**, **staging environment**, **observability** (Sentry, log aggregation), and a **backup/restore** runbook.
+
+---
+
+## Appendix: the whole thing as one script
+
+For a from-scratch run (replace `<org>` and the `REDIS_URL`):
+
+```bash
+# 0. Tooling
+curl -L https://fly.io/install.sh | sh && fly auth login
+
+# 1. Provision
 fly apps create quanta-api
 fly apps create quanta-web
 fly postgres create --name quanta-db --region ord \
   --initial-cluster-size 1 --vm-size shared-cpu-1x --volume-size 3
 fly postgres attach quanta-db --app quanta-api
-fly redis create --name quanta-redis --region ord
+fly redis create        # interactive: org, name quanta-redis, region ord, eviction No
 
-# Step 3
+# 3. Secrets (paste REDIS_URL from `fly redis status quanta-redis`)
 fly secrets set --app quanta-api \
   SESSION_SECRET="$(openssl rand -hex 32)" \
   TOTP_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-  REDIS_URL="<from fly redis create>" \
+  REDIS_URL="redis://default:...@...upstash.io:6379" \
   WEB_URL="https://quanta-web.fly.dev"
 
-# Step 4a
-fly tokens create deploy -x 8760h
+# 4. Org-scoped deploy token → paste into GitHub as FLY_API_TOKEN
+fly tokens create org <org>
 
-# Step 6
-fly ssh console --app quanta-api -C "npx tsx prisma/seed.ts"
+# 5. First deploy is triggered from GitHub (push or workflow_dispatch).
+#    Manual fallback, per app:
+#      cd packages/api && fly deploy --remote-only
+#      cd packages/web && fly deploy --remote-only
 
-# Manual deploys (in case CI is broken)
-cd packages/api && fly deploy --remote-only
-cd packages/web && fly deploy --remote-only
+# 6. Seed
+fly ssh console --app quanta-api --command "npx tsx prisma/seed.ts"
 ```
