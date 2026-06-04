@@ -109,7 +109,11 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         redis: redisStatus() ? "connected" : "disconnected",
         timestamp: new Date().toISOString(),
       });
-    } catch {
+    } catch (err) {
+      logger.error(
+        { err: (err as Error)?.message ?? String(err) },
+        "Health check failed: database SELECT 1 errored"
+      );
       res.status(503).json({ status: "error", message: "Service unavailable" });
     }
   });
