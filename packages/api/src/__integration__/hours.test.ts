@@ -54,6 +54,9 @@ async function seedScenario() {
     createdBy: pm.id,
     totalWeeks: 4,
     assignments: [
+      // The PM is assigned too: project access is assignment-based
+      // (canAccessProject grants IC/PM only via assignment, not creation).
+      { userId: pm.id, projectRole: "PM" },
       { userId: ic.id, projectRole: "iOS Dev" },
       { userId: otherIc.id, projectRole: "Android Dev" },
     ],
@@ -88,7 +91,7 @@ describe("PUT /api/projects/:id/hours", () => {
     const entry = await prisma.hourEntry.findFirst({
       where: { assignmentId: icAssignment.id, projectWeek: 0 },
     });
-    expect(entry?.actualHours).toBe(8);
+    expect(Number(entry?.actualHours)).toBe(8);
   });
 
   it("IC cannot edit someone else's actual hours", async () => {
@@ -104,7 +107,7 @@ describe("PUT /api/projects/:id/hours", () => {
     const entry = await prisma.hourEntry.findFirst({
       where: { assignmentId: otherIcAssignment.id, projectWeek: 0 },
     });
-    expect(entry?.actualHours).toBe(0);
+    expect(Number(entry?.actualHours)).toBe(0);
   });
 
   it("IC cannot edit planned hours even on their own row", async () => {
@@ -132,8 +135,8 @@ describe("PUT /api/projects/:id/hours", () => {
     const entry = await prisma.hourEntry.findFirst({
       where: { assignmentId: icAssignment.id, projectWeek: 0 },
     });
-    expect(entry?.plannedHours).toBe(24);
-    expect(entry?.actualHours).toBe(18);
+    expect(Number(entry?.plannedHours)).toBe(24);
+    expect(Number(entry?.actualHours)).toBe(18);
   });
 
   it("Locked week rejects writes from any role", async () => {
@@ -153,7 +156,7 @@ describe("PUT /api/projects/:id/hours", () => {
     const entry = await prisma.hourEntry.findFirst({
       where: { assignmentId: icAssignment.id, projectWeek: 0 },
     });
-    expect(entry?.actualHours).not.toBe(99);
+    expect(Number(entry?.actualHours)).not.toBe(99);
   });
 });
 

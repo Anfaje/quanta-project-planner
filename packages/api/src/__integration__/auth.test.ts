@@ -147,7 +147,9 @@ describe("POST /api/auth/login + MFA", () => {
       .send({ email: user.email, password: "wrong-password-12345" });
 
     expect(res.status).toBe(401);
-    expect(res.headers["set-cookie"]?.[0]).not.toMatch(/connect\.sid=s%3A/);
+    // No session cookie is set on a failed login; coalesce so toMatch()
+    // gets a string rather than throwing on undefined.
+    expect((res.headers["set-cookie"]?.[0]) ?? "").not.toMatch(/connect\.sid=s%3A/);
   });
 
   it("MFA verify accepts a fresh TOTP code and grants session access", async () => {
@@ -178,9 +180,10 @@ describe("POST /api/auth/login + MFA", () => {
     expect(res.status).toBe(401);
   });
 
-  it("MFA verify with no prior login attempt returns 401", async () => {
+  it("MFA verify with no prior login attempt is rejected (400, no MFA in progress)", async () => {
     const res = await request(app).post("/api/auth/mfa/verify").send({ code: currentTotpCode() });
-    expect(res.status).toBe(401);
+    // requireMFAPending guards step 2: with no pending login it returns 400.
+    expect(res.status).toBe(400);
   });
 });
 

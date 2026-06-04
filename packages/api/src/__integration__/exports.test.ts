@@ -51,6 +51,7 @@ async function seedExportScenario() {
     owningBuId: bu.id,
     createdBy: pm.id,
     assignments: [
+      { userId: pm.id, projectRole: "PM" },
       { userId: ic.id, projectRole: "iOS Dev", billRate: 175, costRate: 90 },
     ],
     seedHours: { plannedPerWeek: 20, actualPerWeek: 10 },

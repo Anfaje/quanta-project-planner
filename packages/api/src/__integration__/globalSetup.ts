@@ -101,6 +101,7 @@ export default async function globalSetup() {
         passwordHash,
         roles: ["AA"],
         primaryBuId: buA.id,
+        financialAccess: true,
         totpSecret: encryptedTOTP,
         totpVerified: true,
         isActive: true,
