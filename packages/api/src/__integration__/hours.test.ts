@@ -207,12 +207,14 @@ describe("POST /api/projects/:id/weeks/:week/lock + /unlock", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("POST /api/projects/:id/weeks/:week/fill-remaining", () => {
-  it("PM can spread remaining-budget evenly across unlocked weeks", async () => {
+  it("PM fill-remaining copies a week's planned into blank actuals", async () => {
     const { pm, project, icAssignment } = await seedScenario();
-    // First, set actual hours on weeks 0..1 to consume some budget; planned is 20/wk.
+    // Blank week 2's actual (seeded to 0) so it becomes a fill candidate.
+    // fill-remaining copies planned -> actual for the given week's entries
+    // whose actual is null; planned is 20/wk.
     await prisma.hourEntry.updateMany({
-      where: { assignmentId: icAssignment.id, projectWeek: { in: [0, 1] } },
-      data: { actualHours: 10 },
+      where: { assignmentId: icAssignment.id, projectWeek: 2 },
+      data: { actualHours: null },
     });
 
     const agent = await authenticateAs(app, pm.email);
@@ -221,13 +223,10 @@ describe("POST /api/projects/:id/weeks/:week/fill-remaining", () => {
       .send({ assignmentId: icAssignment.id });
     expect(res.status).toBe(200);
 
-    // Weeks 2..3 should each have a value > 0 written.
-    const filled = await prisma.hourEntry.findMany({
-      where: { assignmentId: icAssignment.id, projectWeek: { gte: 2 } },
-      orderBy: { projectWeek: "asc" },
+    const week2 = await prisma.hourEntry.findFirst({
+      where: { assignmentId: icAssignment.id, projectWeek: 2 },
     });
-    expect(filled.length).toBe(2);
-    expect(filled.every((e) => Number(e.actualHours ?? 0) > 0)).toBe(true);
+    expect(Number(week2?.actualHours)).toBe(20); // planned copied into actual
   });
 });
 
@@ -331,7 +330,10 @@ describe("POST /api/projects/:id/hours/import", () => {
       owningBuId: bu.id,
       createdBy: pm.id,
       totalWeeks: 2,
-      assignments: [{ userId: named.id, projectRole: "iOS Dev" }],
+      assignments: [
+        { userId: pm.id, projectRole: "PM" },
+        { userId: named.id, projectRole: "iOS Dev" },
+      ],
       seedHours: { plannedPerWeek: 10, actualPerWeek: 0 },
     });
     // Quoted because of the accent-free comma-safety + exercising the parser.

@@ -219,7 +219,7 @@ describe("POST /api/projects", () => {
       .send({
         ...body,
         // Project spans 5 weeks; week 99 is way past the end.
-        plannedHours: [{ userId: pm.id, projectWeek: 99, hours: 8 }],
+        plannedHours: [{ userId: pm.id, projectWeek: 99, plannedHours: 8 }],
       });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/out of range/i);

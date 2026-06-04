@@ -115,7 +115,7 @@ describe("POST /api/invites/:token/accept", () => {
 
     const res = await request(app)
       .post(`/api/invites/${invite.token}/accept`)
-      .send({ password: TEST_PASSWORD });
+      .send({ name: "New Hire", password: TEST_PASSWORD });
     expect(res.status).toBe(201);
     expect(res.body.mfaSetup?.qrUri).toMatch(/^otpauth:\/\//);
     expect(res.body.mfaSetup?.manualKey).toMatch(/^[A-Z2-7]+$/);
@@ -133,7 +133,7 @@ describe("POST /api/invites/:token/accept", () => {
     const invite = await seedInvite();
     const res = await request(app)
       .post(`/api/invites/${invite.token}/accept`)
-      .send({ password: "short" });
+      .send({ name: "Shorty", password: "short" });
     expect(res.status).toBe(400);
   });
 
@@ -141,7 +141,7 @@ describe("POST /api/invites/:token/accept", () => {
     const invite = await seedInvite({ acceptedAt: new Date() });
     const res = await request(app)
       .post(`/api/invites/${invite.token}/accept`)
-      .send({ password: TEST_PASSWORD });
+      .send({ name: "New Hire", password: TEST_PASSWORD });
     expect(res.status).toBe(410);
   });
 
@@ -149,7 +149,7 @@ describe("POST /api/invites/:token/accept", () => {
     const invite = await seedInvite({ expiresAt: new Date(Date.now() - 1000) });
     const res = await request(app)
       .post(`/api/invites/${invite.token}/accept`)
-      .send({ password: TEST_PASSWORD });
+      .send({ name: "New Hire", password: TEST_PASSWORD });
     expect(res.status).toBe(410);
   });
 
@@ -162,7 +162,7 @@ describe("POST /api/invites/:token/accept", () => {
     const invite = await seedInvite({ email: stolenEmail });
     const res = await request(app)
       .post(`/api/invites/${invite.token}/accept`)
-      .send({ password: TEST_PASSWORD });
+      .send({ name: "New Hire", password: TEST_PASSWORD });
     expect(res.status).toBe(409);
   });
 });

@@ -129,7 +129,7 @@ describe("Domain whitelist CRUD", () => {
     const list = await agent.get("/api/admin/domains").expect(200);
     expect(list.body.domains.some((d: { domain: string }) => d.domain === "newco.io")).toBe(true);
 
-    await agent.delete(`/api/admin/domains/${addedId}`).expect(204);
+    await agent.delete(`/api/admin/domains/${addedId}`).expect(200);
 
     const after = await prisma.domainWhitelist.findUnique({ where: { id: addedId } });
     expect(after).toBeNull();
