@@ -23,15 +23,16 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends openssl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy manifest first so the npm install layer caches when only source
-# changes. We deliberately don't use a workspace install — Fly's build
-# context is packages/api/ so the manifest here is the leaf package.
+# Copy manifest + Prisma schema first so the npm install layer caches when
+# only source changes. package.json's `postinstall` runs `prisma generate`,
+# which needs prisma/schema.prisma present — so the schema must be copied
+# BEFORE install (this is also why there's no separate generate step; the
+# postinstall during `npm install` does it). We deliberately don't use a
+# workspace install — Fly's build context is packages/api/, so the manifest
+# here is the leaf package.
 COPY package.json ./
-RUN npm install --no-audit --no-fund
-
-# Schema must exist before prisma generate.
 COPY prisma ./prisma
-RUN npx prisma generate
+RUN npm install --no-audit --no-fund
 
 # Now bring in source + compile.
 COPY tsconfig.json ./
