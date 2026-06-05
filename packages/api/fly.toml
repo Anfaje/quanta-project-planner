@@ -8,9 +8,12 @@
 #
 # Before the first deploy:
 #   fly apps create quanta-api
-#   fly postgres create --name quanta-db --region ord
-#   fly postgres attach quanta-db --app quanta-api
-#     (this auto-sets DATABASE_URL on the API app)
+#   fly mpg create --name quanta-db --region ord     # Managed Postgres (MPG)
+#   fly mpg attach quanta-db --app quanta-api         # auto-sets DATABASE_URL
+#     The attached URL points at MPG's PgBouncer pooler (Session mode by
+#     default). Prisma works against it as-is — no ?pgbouncer=true needed
+#     unless you switch the pooler to Transaction mode, which disables named
+#     prepared statements. See DEPLOY.md for the full connection notes.
 #   fly redis create --name quanta-redis --region ord
 #     (copy the printed REDIS_URL into fly secrets below)
 #   fly secrets set --app quanta-api \
@@ -60,7 +63,7 @@ primary_region = "ord"  # Chicago — matches the user's location
 [http_service]
   internal_port      = 4000
   force_https        = true
-  auto_stop_machines = false  # keep warm for testing — flip to true once we have CI
+  auto_stop_machines = false  # keep both machines warm; flip to true to scale to zero when idle
   auto_start_machines = true
   min_machines_running = 1
 
@@ -70,9 +73,10 @@ primary_region = "ord"  # Chicago — matches the user's location
     hard_limit = 100
 
   # Fly's health checker hits /api/health on the http_service port.
-  # createApp's /api/health probes Postgres via SELECT 1 + reports
-  # Redis status; 503 if either is down so Fly will keep the previous
-  # machine serving during a failed deploy.
+  # createApp's /api/health probes Postgres with SELECT 1 — retried once so a
+  # PgBouncer-recycled idle connection doesn't flap the check — and reports
+  # Redis status, returning 503 only if the DB is truly unreachable so Fly
+  # keeps the previous machine serving during a failed deploy.
   [[http_service.checks]]
     grace_period  = "30s"
     interval      = "15s"

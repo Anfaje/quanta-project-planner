@@ -3,7 +3,7 @@
 This walks you through getting Quanta running on Fly.io for end-to-end testing. Provisioning is done from the **Fly CLI (`flyctl`)** — Fly moved both Postgres and Redis creation to the CLI, so there's no longer a pure point-and-click path. The ongoing **deploys** are still fully automated by the **GitHub Actions workflows** (Drop 5b): you wire things up once, then every push to `main` that touches `packages/api/**` or `packages/web/**` deploys that app automatically.
 
 **Time:** 15–25 minutes the first time.
-**Cost:** Fly no longer has a blanket free tier. An always-on test setup (two small app machines kept warm, a tiny unmanaged Postgres, and a free-allowance Redis) runs on the order of a few dollars a month. You can cut that by letting the app machines scale to zero (see the note in step 1a). A credit card must be on file. Check current pricing at https://fly.io/docs/about/pricing/.
+**Cost:** Fly no longer has a blanket free tier. This guide uses **Managed Postgres (MPG)**, whose smallest plan (Basic: shared-2x / 1 GB) is about $38/month plus ~$0.28/GB-month of storage; add two small always-on app machines and a free-allowance Redis and you're at roughly $40/month. If that's too much for a test box, swap MPG for Fly's cheaper **unmanaged** Postgres (`fly postgres`, a few dollars a month) — only steps 1b–1c and teardown change. Letting the app machines scale to zero (note in step 1a) trims the rest. A card must be on file; check live pricing at https://fly.io/docs/about/pricing/ and https://fly.io/docs/mpg/.
 **Prerequisites:** A Fly account with a card linked, push access to this GitHub repo, and `flyctl` installed (step 0).
 
 ---
@@ -30,14 +30,14 @@ This walks you through getting Quanta running on Fly.io for end-to-end testing. 
    ┌─────────┐ ┌─────────┐
    │ quanta- │ │ quanta- │
    │   db    │ │  redis  │
-   │ (Fly PG)│ │(Upstash)│
+   │(Fly MPG)│ │(Upstash)│
    └─────────┘ └─────────┘
 ```
 
 Everything lives in one Fly organisation, same region (default: `ord` — Chicago). Cookies are first-party (the SPA and API share an origin via the nginx proxy), there's no CORS, and the only public port is `quanta-web.fly.dev`.
 
 A note on the two databases:
-- **Postgres** here is **Fly's unmanaged Postgres** (`fly postgres`), which the dashboard now labels **"Legacy."** It's a normal Fly app with tooling on top — cheap and perfectly fine for testing, but **not** a managed service (if it runs out of memory/disk, you fix it). For production, Fly recommends **Managed Postgres (MPG)** — fully managed with HA, backups, and failover — but it starts around $38/month, so it's overkill for an end-to-end test box. Migrating to MPG is parked under "hardening" at the bottom.
+- **Postgres** is **Fly Managed Postgres (MPG)** — fully managed, with HA, automated backups, failover, and built-in **PgBouncer** connection pooling. The `DATABASE_URL` that `fly mpg attach` sets points at the pooler (Session mode by default), which is why Prisma needs no special `?pgbouncer=true` flag here. MPG's smallest plan is ~$38/month; if you'd rather run a test box for a few dollars, Fly's **unmanaged** Postgres (`fly postgres`, dashboard-labelled "Legacy") is a drop-in swap for steps 1b–1c.
 - **Redis** is **Upstash for Redis**, provisioned through Fly. We use it only for session storage.
 
 ---
@@ -76,28 +76,31 @@ This just reserves the names/app records — no machines deploy yet (the first i
 
 > **Cost tip:** the committed `fly.toml` keeps machines warm (`auto_stop_machines = false`, `min_machines_running = 1`) so the test box is always responsive. To minimise spend, set `auto_stop_machines = true` and `min_machines_running = 0` in both `fly.toml` files — the apps then scale to zero when idle and cold-start on the next request.
 
-### 1b. Provision Postgres (unmanaged / "Legacy")
+### 1b. Provision Managed Postgres
 
 ```bash
-fly postgres create --name quanta-db --region ord \
-  --initial-cluster-size 1 --vm-size shared-cpu-1x --volume-size 3
+fly mpg create --name quanta-db --region ord
 ```
 
-If you run `fly postgres create` with no flags it prompts interactively instead; pick a **single-node / Development** configuration, region `ord`, smallest VM, ~3 GB volume. Wait ~30 seconds for the machine to come up.
+It prompts for plan and volume; pick the **Basic** plan, region `ord`, and a small volume (the default is 10 GB; `--volume-size 3` is plenty for testing). Provisioning takes a minute or two. MPG clusters include PgBouncer and default to **Session** pool mode.
 
-> The dashboard's database creator now steers you to **Managed Postgres** (the paid, fully-managed option). The command above deliberately creates the cheaper **unmanaged** Postgres, which is the right call for a test deploy and matches what the API's `fly.toml` expects.
+> Prefer a cheaper test box? Substitute Fly's unmanaged Postgres:
+> `fly postgres create --name quanta-db --region ord --initial-cluster-size 1 --vm-size shared-cpu-1x --volume-size 3`
+> Everything downstream is identical except teardown (`fly apps destroy quanta-db` instead of `fly mpg destroy`).
 
 ### 1c. Attach Postgres to the API
 
 ```bash
-fly postgres attach quanta-db --app quanta-api
+fly mpg attach quanta-db --app quanta-api
 ```
 
-This one action: creates a dedicated database inside the cluster, creates a scoped role, and writes the connection string as a `DATABASE_URL` secret on `quanta-api`. Verify:
+This writes the pooled connection string as a `DATABASE_URL` secret on `quanta-api` (it also triggers a deploy if the app already has machines). The URL targets MPG's PgBouncer pooler — Prisma talks to it unchanged. Verify:
 
 ```bash
 fly secrets list --app quanta-api    # should list DATABASE_URL
 ```
+
+> Used unmanaged Postgres in 1b? Attach with `fly postgres attach quanta-db --app quanta-api` instead.
 
 ### 1d. Provision Upstash Redis
 
@@ -270,6 +273,24 @@ No manual step. Rollbacks and logs are in the Fly dashboard (or `fly releases` /
 
 ---
 
+## Why it works: the non-obvious bits
+
+Four things in this repo are load-bearing for a Fly deploy and each cost real debugging time to get right. If you fork or re-platform this, keep them in mind.
+
+### The API binds to `::`, not `0.0.0.0`
+Fly's private network (6PN — what `*.internal` names like `quanta-api.internal` resolve to) is **IPv6-only**. An app bound to `0.0.0.0` (IPv4) is reachable through Fly's *public* proxy and passes health checks, but **other apps can't reach it over `.internal`** — so the web container's nginx `/api` proxy gets connection-refused and every `/api/*` call 502s while the static SPA still loads. `packages/api/src/index.ts` listens on `::`; on Linux that also accepts IPv4-mapped connections, so the public proxy keeps working. Telltale sign if this regresses: `quanta-api.fly.dev/api/health` is healthy but the web app's API calls 502.
+
+### The Dockerfile copies `prisma/` *before* `npm install`
+`package.json`'s `postinstall` runs `prisma generate`, which needs `prisma/schema.prisma` on disk. The API Dockerfile copies the schema before `npm install` (so there's deliberately no separate `prisma generate` step — the postinstall does it). Reorder these and the image build fails at install time.
+
+### nginx resolves the API at request time and returns JSON when it's down
+With a literal hostname in `proxy_pass`, nginx resolves `quanta-api.internal` once at startup and **fails to boot** ("host not found in upstream") if the API is mid-deploy — taking the whole web app down. `nginx.conf.template` instead uses Fly's internal resolver (`[fdaa::3]`) plus a variable upstream, so nginx starts regardless and re-resolves per request (also picking up the API's new address on each redeploy). It also answers an unreachable `/api/*` with a small JSON 502 rather than the SPA's `index.html`, so a backend outage doesn't masquerade as a blank page (and is obvious in DevTools).
+
+### The health check tolerates a recycled Postgres connection
+MPG sits behind Fly's proxy + PgBouncer, which **terminate idle connections** — Fly's proxy drains and closes anything still open past ~10 minutes. A pooled Prisma connection can therefore be dead when a query lands on it; Prisma reconnects on the next query, but the one that hit the stale connection errors once. `/api/health` retries `SELECT 1` once so a single recycled connection doesn't flap the check (and 502 the machine). You'll see occasional `prisma:error … E57P01 "terminating connection due to administrator command"` in the logs after idle periods — expected, and self-healing. To make it rarer under steady load, keep the Prisma pool small (e.g. `?connection_limit=5` on `DATABASE_URL`); reconnection covers the rest.
+
+---
+
 ## Troubleshooting
 
 ### CI passes but deploy fails with "no authentication credentials" / 401
@@ -283,15 +304,23 @@ The `prisma db push` release command likely failed. Check logs:
 ```bash
 fly logs --app quanta-api
 ```
-Common causes: `DATABASE_URL` missing (re-run `fly postgres attach quanta-db --app quanta-api`), or the Postgres machine is stopped (`fly status --app quanta-db`).
+Common causes: `DATABASE_URL` missing (re-run `fly mpg attach quanta-db --app quanta-api`), or the cluster is unreachable (check its status in the MPG dashboard, or `fly mpg list`). On unmanaged Postgres, re-attach with `fly postgres attach …` and check `fly status --app quanta-db`.
 
 ### Health check shows `redis: "disconnected"`
 - Verify `REDIS_URL` is the full, untruncated string (`fly secrets list --app quanta-api` shows it's set; re-set if unsure).
 - Confirm the Redis primary region matches `quanta-api`'s (`fly redis status quanta-redis`).
 - Restart the API: `fly apps restart quanta-api`.
 
-### Web app loads but `/api/me` returns 502
-The nginx upstream can't reach the API. Both apps must be in the **same Fly organisation**. Confirm the API has a running machine: `fly status --app quanta-api` (expect a machine in state `started`).
+### Web app loads but `/api/*` returns 502 (sometimes as an HTML page, not JSON)
+nginx is up but can't reach the API over `.internal`. Check, in order:
+1. **API binding** — the usual culprit. If the API is bound to `0.0.0.0` (IPv4) instead of `::`, 6PN (IPv6-only) is unreachable, so the public health check passes but `.internal` is refused. `packages/api/src/index.ts` must call `app.listen(port, "::", …)`. If `quanta-api.fly.dev/api/health` is healthy while the web app 502s, this is almost certainly it.
+2. **Same org** — both apps must be in the same Fly organisation to share the private network.
+3. **API is running** — `fly status --app quanta-api`, expect a machine in state `started`.
+
+A bare JSON body `{"error":"API temporarily unavailable"}` (rather than the SPA shell) confirms nginx is doing its job and the API itself is the unreachable piece.
+
+### Logs show `prisma:error … E57P01 "terminating connection due to administrator command"`
+Expected on MPG after idle periods — Fly's proxy/PgBouncer recycles idle connections (closing anything open past ~10 minutes). Prisma reconnects automatically and `/api/health` retries once, so it self-heals; no action needed. To make it rarer under load, lower the Prisma pool with `?connection_limit=5` on `DATABASE_URL`.
 
 ### Cookies don't persist between requests
 Make sure you're hitting `https://quanta-web.fly.dev` (not the API host directly) and that `WEB_URL` on the API matches it. The session cookie is `Secure`+first-party; mismatched origins break it.
@@ -317,13 +346,13 @@ To stop spending or start over:
 ```bash
 fly apps destroy quanta-web
 fly apps destroy quanta-api
-fly apps destroy quanta-db        # unmanaged Postgres is just an app
+fly mpg destroy quanta-db         # Managed Postgres lives outside your apps
 fly redis destroy quanta-redis
 ```
 
 Then remove the GitHub secret (https://github.com/Anfaje/quanta-project-planner/settings/secrets/actions) and revoke the Fly token (`fly tokens list` → `fly tokens revoke <id>`).
 
-> After teardown, run `fly volumes list` and `fly apps list` to make sure nothing lingers — orphaned volumes still bill. (This matters more if you ever switch to Managed Postgres, which lives **outside** your apps and isn't removed by deleting an app.)
+> After teardown, run `fly volumes list` and `fly apps list` to make sure nothing lingers — orphaned volumes still bill. **MPG lives outside your apps**, so `fly apps destroy` does *not* remove it; the `fly mpg destroy` above is what deletes it. (If you used unmanaged Postgres, `fly apps destroy quanta-db` removes it instead.)
 
 ---
 
@@ -331,7 +360,7 @@ Then remove the GitHub secret (https://github.com/Anfaje/quanta-project-planner/
 
 This is the minimum viable deploy. Production work parked for later:
 
-- **Migrate to Managed Postgres (MPG)** — swap the unmanaged "Legacy" Postgres for `fly mpg` (HA, automated backups, failover). Costs more; worth it for real data.
+- **Tune the Postgres connection for production load** — set `?connection_limit` on `DATABASE_URL` to match the machine size, and if you scale out connections consider switching the MPG pooler to Transaction mode (add `?pgbouncer=true` so Prisma stops using named prepared statements). MPG itself — HA, backups, failover — is already in place.
 - **Real migrations** — replace the `prisma db push` release command with `prisma migrate deploy` once a `prisma/migrations` history exists (run `npx prisma migrate dev --name init` locally first). `db push` is fine for a test box but won't give you versioned, reviewable schema changes.
 - **Reset-token email + hashing** — wire SMTP so password-reset links are emailed (not returned in the response), and hash reset tokens at rest (see [`SECURITY.md`](SECURITY.md)).
 - **Terraform** — declarative provisioning so all of the above is reproducible from code.
@@ -350,9 +379,8 @@ curl -L https://fly.io/install.sh | sh && fly auth login
 # 1. Provision
 fly apps create quanta-api
 fly apps create quanta-web
-fly postgres create --name quanta-db --region ord \
-  --initial-cluster-size 1 --vm-size shared-cpu-1x --volume-size 3
-fly postgres attach quanta-db --app quanta-api
+fly mpg create --name quanta-db --region ord     # Managed Postgres; pick the Basic plan
+fly mpg attach quanta-db --app quanta-api         # sets DATABASE_URL (pooled, PgBouncer)
 fly redis create        # interactive: org, name quanta-redis, region ord, eviction No
 
 # 3. Secrets (paste REDIS_URL from `fly redis status quanta-redis`)

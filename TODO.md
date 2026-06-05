@@ -62,13 +62,13 @@ These were surfaced by the Drop 6c audit. The tier ranking reflects relative imp
 
 ## Drop 5 — Infrastructure
 
-### Drop 5a — Fly.io deploy ✅ (shipped)
+### Drop 5a — Fly.io deploy ✅ (shipped, live end-to-end)
 
-Production Dockerfiles, fly.toml × 2, nginx reverse-proxy template, DEPLOY.md runbook. See [`DEPLOY.md`](DEPLOY.md) for the step-by-step.
+Production Dockerfiles, fly.toml × 2, nginx reverse-proxy template, DEPLOY.md runbook. Taken **live** on Fly (Managed Postgres + Upstash Redis) with login working through the nginx `/api` proxy. The non-obvious bits the bring-up surfaced — the API must bind `::` for Fly's IPv6 private network, the Dockerfile copies `prisma/` before `npm install`, nginx resolves the upstream at request time and returns JSON when the API is down, and `/api/health` retries once around PgBouncer's idle-connection recycling — are written up in [`DEPLOY.md`](DEPLOY.md) § "Why it works: the non-obvious bits". See [`DEPLOY.md`](DEPLOY.md) for the step-by-step.
 
 ### Drop 5b — GitHub Actions CI/CD ✅ (shipped)
 
-Two workflows in `.github/workflows/` — one per package. Path-filtered so a docs change doesn't trigger CI; cancel-in-progress on PRs but not on main deploys. The API CI spins up Postgres as a service container and runs the full integration suite from Drop 6d. Deploys on push to `main` after CI passes. See [`DEPLOY.md`](DEPLOY.md) § 7 for the one-time `FLY_API_TOKEN` setup.
+Two workflows in `.github/workflows/` — one per package. Path-filtered so a docs change doesn't trigger CI; cancel-in-progress on PRs but not on main deploys. The API CI spins up Postgres as a service container and runs the full integration suite from Drop 6d. Deploys on push to `main` after CI passes. See [`DEPLOY.md`](DEPLOY.md) § 4 for the one-time `FLY_API_TOKEN` setup.
 
 ### Drop 5c — Production hardening (deferred)
 

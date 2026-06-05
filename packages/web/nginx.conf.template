@@ -65,9 +65,25 @@ server {
         proxy_send_timeout    60s;
         proxy_read_timeout    60s;
 
+        # The API's own 4xx/5xx responses (e.g. 401 on bad credentials, 500
+        # on an app bug) must reach the SPA unchanged, so proxy_intercept_errors
+        # is left off (the default). Only the errors nginx ITSELF raises when it
+        # can't reach the API at all (connection refused, DNS failure, timeout)
+        # are caught here — and we answer with JSON, not the SPA's index.html.
+        # Serving the HTML shell for a dead backend is exactly what made an
+        # unreachable API look like a generic 502 page during bring-up; an /api
+        # client should always get a machine-readable body.
+        error_page 502 503 504 = @api_unavailable;
+
         # Cookies are first-party (same origin as the SPA), so we don't
         # need to rewrite Set-Cookie domain — the API can issue cookies
         # for the web hostname and they Just Work.
+    }
+
+    # Clean JSON error for /api/* when the API container is unreachable.
+    location @api_unavailable {
+        default_type application/json;
+        return 502 '{"error":"API temporarily unavailable"}';
     }
 
     # SPA fallback: any unmatched non-API path serves index.html so
@@ -76,7 +92,8 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # Friendly errors instead of nginx defaults.
+    # SPA client-side routing only: a missing *page* serves index.html so
+    # deep links survive a refresh. 5xx is handled per-location (see /api/) —
+    # a server error should never be answered with the SPA shell.
     error_page 404 /index.html;
-    error_page 500 502 503 504 /index.html;
 }
