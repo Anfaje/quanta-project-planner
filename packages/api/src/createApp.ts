@@ -101,20 +101,33 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   // ── Health check ──
   const redisStatus = opts.redisStatus ?? (() => true);
   app.get("/api/health", async (_req, res) => {
-    try {
-      await prisma.$queryRaw`SELECT 1`;
-      res.json({
-        status: "ok",
-        db: "connected",
-        redis: redisStatus() ? "connected" : "disconnected",
-        timestamp: new Date().toISOString(),
-      });
-    } catch (err) {
-      logger.error(
-        { err: (err as Error)?.message ?? String(err) },
-        "Health check failed: database SELECT 1 errored"
-      );
-      res.status(503).json({ status: "error", message: "Service unavailable" });
+    // Fly Managed Postgres (pgbouncer) recycles idle connections, so a pooled
+    // connection may already be dead when a query lands on it. Prisma reconnects
+    // transparently on the next query, so retry SELECT 1 once: this prevents a
+    // single recycled connection from producing a false 503 and flapping Fly's
+    // health check (which otherwise marks the machine unhealthy and 502s).
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await prisma.$queryRaw`SELECT 1`;
+        return res.json({
+          status: "ok",
+          db: "connected",
+          redis: redisStatus() ? "connected" : "disconnected",
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err) {
+        if (attempt === 2) {
+          logger.error(
+            { err: (err as Error)?.message ?? String(err) },
+            "Health check failed: database SELECT 1 errored after retry"
+          );
+          return res
+            .status(503)
+            .json({ status: "error", message: "Service unavailable" });
+        }
+        // brief pause to let Prisma establish a fresh connection
+        await new Promise((r) => setTimeout(r, 150));
+      }
     }
   });
 
