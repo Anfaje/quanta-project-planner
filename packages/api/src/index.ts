@@ -53,7 +53,14 @@ const app = createApp({
 
 const port = Number(process.env.API_PORT) || 4000;
 
-app.listen(port, "0.0.0.0", () => {
+// Listen on :: (dual-stack), NOT 0.0.0.0. Fly's private network (6PN — what
+// *.internal names like quanta-api.internal resolve to) is IPv6-only, so
+// binding to 0.0.0.0 (IPv4) leaves the app reachable via Fly's public proxy
+// but NOT from other Fly apps over .internal. That's why the web container's
+// nginx /api proxy got connection-refused → 502 while public curls returned
+// 401. On Linux, a :: socket also accepts IPv4-mapped connections, so the
+// public proxy and health checks keep working.
+app.listen(port, "::", () => {
   logger.info(`🚀 Quanta API listening on port ${port}`);
   logger.info(`   Environment: ${process.env.NODE_ENV || "development"}`);
   logger.info(`   Health: http://localhost:${port}/api/health`);
