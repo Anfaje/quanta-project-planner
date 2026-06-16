@@ -33,6 +33,7 @@ export function SignupPage() {
   const navigate = useNavigate();
 
   const [domains, setDomains] = useState<string[] | null>(null);
+  const [domainsUnavailable, setDomainsUnavailable] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
@@ -48,7 +49,12 @@ export function SignupPage() {
         if (!cancelled) setDomains(res.domains);
       })
       .catch(() => {
-        if (!cancelled) setDomains([]); // fail-open for display; server still enforces
+        // Couldn't load the whitelist (network error, or the endpoint was
+        // rate-limited). Don't block signup client-side — the server enforces
+        // the whitelist on submit and returns an authoritative 403 listing the
+        // allowed domains. (Setting [] here instead would make every domain
+        // appear disallowed.)
+        if (!cancelled) setDomainsUnavailable(true);
       });
     return () => {
       cancelled = true;
@@ -61,9 +67,10 @@ export function SignupPage() {
   }, [email]);
 
   const domainAllowed = useMemo(() => {
+    if (domainsUnavailable) return null; // can't validate locally; let the server decide
     if (!domains || !emailDomain) return null;
     return domains.includes(emailDomain);
-  }, [domains, emailDomain]);
+  }, [domains, emailDomain, domainsUnavailable]);
 
   const toggleRole = (role: string) =>
     setProjectRoles((prev) =>
@@ -206,7 +213,7 @@ export function SignupPage() {
         </Button>
       </form>
 
-      {domains === null && (
+      {domains === null && !domainsUnavailable && (
         <div className="flex items-center justify-center gap-2 text-xs text-gray-400 mt-4">
           <Spinner size="xs" /> Loading allowed domains…
         </div>

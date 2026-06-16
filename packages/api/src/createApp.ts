@@ -95,7 +95,17 @@ export function createApp(opts: CreateAppOptions = {}): Express {
     // Tests issue more than 10 requests per IP; gate the limiter to skip in
     // test mode. The unit test suite doesn't exercise rate limiting; the
     // integration suite tests it explicitly by toggling this flag.
-    skip: () => process.env.RATE_LIMIT_DISABLED === "1",
+    //
+    // Also skip GET /api/auth/domains: it's a public, read-only endpoint the
+    // signup form fetches on load, so it must not share the auth-attempt
+    // budget — otherwise a few page reloads (or reloads plus login attempts)
+    // would 429 it and the form would wrongly report every domain as not
+    // allowed. req.path is mount-relative ("/domains") here; the endsWith
+    // guard covers it regardless of how the router strips the prefix.
+    skip: (req) =>
+      process.env.RATE_LIMIT_DISABLED === "1" ||
+      req.path === "/domains" ||
+      req.path.endsWith("/auth/domains"),
   });
 
   // ── Health check ──
