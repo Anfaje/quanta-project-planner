@@ -14,6 +14,19 @@
 # in docker-entrypoint.sh, so the same image works for staging, prod,
 # and any local-compose setup just by changing the env var.
 
+# Fly terminates TLS at its edge and forwards to this container over plain
+# HTTP, so nginx's own $scheme is "http". Fly does set X-Forwarded-Proto:
+# https on the request, so preserve THAT when proxying to the API rather than
+# overwriting it with $scheme. If we forward "http", the API (trust proxy = 1)
+# treats the connection as insecure and express-session refuses to set the
+# Secure session cookie: login appears to work but the next request carries no
+# session ("No MFA challenge pending", and nothing stays logged in). Fall back
+# to $scheme for local/compose where the header is absent.
+map $http_x_forwarded_proto $forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
 server {
     listen 8080 default_server;
     server_name _;
@@ -56,7 +69,7 @@ server {
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Forwarded-Proto $forwarded_proto;
         proxy_set_header   X-Forwarded-Host  $host;
 
         # The API streams export.pdf and export.csv responses; allow
