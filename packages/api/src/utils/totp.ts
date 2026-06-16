@@ -49,22 +49,28 @@ export function decryptSecret(stored: string): string {
 }
 
 /**
- * Generate a new TOTP secret and return the secret + otpauth URI for QR code.
+ * Build the otpauth:// URI (encoded into the QR code) for an EXISTING base32
+ * secret. Centralises the TOTP parameters so the QR, the manual key, and
+ * verifyTOTPCode always describe the same token — important when re-showing
+ * setup for a secret we already stored.
  */
-export function generateTOTPSecret(email: string): { secret: string; uri: string } {
-  const totp = new OTPAuth.TOTP({
+export function buildTOTPUri(email: string, secret: string): string {
+  return new OTPAuth.TOTP({
     issuer: "Quanta",
     label: email,
     algorithm: "SHA1",
     digits: 6,
     period: 30,
-    secret: new OTPAuth.Secret(),
-  });
+    secret: OTPAuth.Secret.fromBase32(secret),
+  }).toString();
+}
 
-  return {
-    secret: totp.secret.base32,
-    uri: totp.toString(),
-  };
+/**
+ * Generate a new TOTP secret and return the secret + otpauth URI for QR code.
+ */
+export function generateTOTPSecret(email: string): { secret: string; uri: string } {
+  const secret = new OTPAuth.Secret().base32;
+  return { secret, uri: buildTOTPUri(email, secret) };
 }
 
 /**

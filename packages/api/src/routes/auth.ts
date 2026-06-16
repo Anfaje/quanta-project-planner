@@ -10,7 +10,7 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
 } from "../utils/validation";
-import { generateTOTPSecret, verifyTOTPCode, encryptSecret, decryptSecret } from "../utils/totp";
+import { generateTOTPSecret, buildTOTPUri, verifyTOTPCode, encryptSecret, decryptSecret } from "../utils/totp";
 import { requireAuth, requireMFAPending } from "../middleware/auth";
 import { logChange } from "../services/auditLog";
 
@@ -145,9 +145,13 @@ router.post("/login", async (req: Request, res: Response) => {
         });
       }
 
-      // Secret exists but not verified yet — show setup again
+      // Secret exists but not verified yet — show setup again using the SAME
+      // stored secret, building the QR URI from it. Previously this minted a
+      // fresh secret just for the QR (via generateTOTPSecret), so the QR and
+      // the manual key encoded different secrets and the QR never verified
+      // against what /mfa/verify checks.
       const secret = decryptSecret(user.totpSecret);
-      const { uri } = generateTOTPSecret(email);
+      const uri = buildTOTPUri(email, secret);
 
       req.session.mfaPending = true;
       req.session.mfaPendingUserId = user.id;
