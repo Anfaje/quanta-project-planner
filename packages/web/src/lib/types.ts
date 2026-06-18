@@ -70,12 +70,15 @@ export interface LoginAuthenticated {
   };
 }
 
-export type LoginResponse = LoginMfaRequired | LoginMfaSetupRequired;
+export type LoginResponse = LoginMfaRequired | LoginMfaSetupRequired | LoginAuthenticated;
 export type MfaVerifyResponse = LoginAuthenticated;
 
 export interface RegisterResponse {
+  // "authenticated" when MFA is disabled (no mfaSetup, user is logged in);
+  // otherwise "mfa_setup_required" and the user must complete TOTP setup.
+  status: "mfa_setup_required" | "authenticated";
   message: string;
-  mfaSetup: { qrUri: string; manualKey: string };
+  mfaSetup?: { qrUri: string; manualKey: string };
   user: {
     id: string;
     email: string;
@@ -96,9 +99,9 @@ export interface InviteContext {
   expiresAt: string;
 }
 
-export type AcceptInviteResponse = LoginMfaSetupRequired & {
-  user: RegisterResponse["user"];
-};
+export type AcceptInviteResponse =
+  | (LoginMfaSetupRequired & { user: RegisterResponse["user"] })
+  | LoginAuthenticated;
 
 // ── Projects ──
 

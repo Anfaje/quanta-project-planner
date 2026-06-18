@@ -12,6 +12,7 @@ import {
 } from "../utils/validation";
 import { generateTOTPSecret, buildTOTPUri, verifyTOTPCode, encryptSecret, decryptSecret } from "../utils/totp";
 import { requireAuth, requireMFAPending } from "../middleware/auth";
+import { mfaEnabled } from "../lib/mfa";
 import { logChange } from "../services/auditLog";
 
 const router = Router();
@@ -70,6 +71,23 @@ router.post("/register", async (req: Request, res: Response) => {
       },
     });
 
+    if (!mfaEnabled()) {
+      // MFA temporarily disabled: log the new user straight in, no TOTP setup.
+      req.session.userId = user.id;
+      logger.info({ userId: user.id, email }, "User registered (MFA disabled)");
+      return res.status(201).json({
+        status: "authenticated",
+        message: "Account created.",
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          roles: user.roles,
+          projectRoles: user.projectRoles,
+        },
+      });
+    }
+
     // Generate TOTP secret (user will verify on first login)
     const { secret, uri } = generateTOTPSecret(email);
     await prisma.user.update({
@@ -80,6 +98,7 @@ router.post("/register", async (req: Request, res: Response) => {
     logger.info({ userId: user.id, email }, "User registered");
 
     res.status(201).json({
+      status: "mfa_setup_required",
       message: "Account created. Please set up two-factor authentication.",
       mfaSetup: {
         qrUri: uri,
@@ -124,6 +143,22 @@ router.post("/login", async (req: Request, res: Response) => {
     const passwordValid = await bcrypt.compare(password, user.passwordHash);
     if (!passwordValid) {
       return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    if (!mfaEnabled()) {
+      // MFA temporarily disabled: complete login immediately, skip the TOTP step.
+      req.session.userId = user.id;
+      logger.info({ userId: user.id, email: user.email }, "User logged in (MFA disabled)");
+      return res.json({
+        status: "authenticated",
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          roles: user.roles,
+          projectRoles: user.projectRoles,
+        },
+      });
     }
 
     // If user hasn't set up TOTP yet, prompt setup

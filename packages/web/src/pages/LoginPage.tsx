@@ -47,6 +47,9 @@ export function LoginPage() {
         navigate("/login/mfa-setup", {
           state: { mfaSetup: res.mfaSetup, from },
         });
+      } else {
+        // status === "authenticated" — MFA disabled, go straight to the app.
+        navigate(from ?? "/dashboard", { replace: true });
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Login failed");

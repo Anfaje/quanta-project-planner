@@ -94,9 +94,14 @@ export function SignupPage() {
         password,
         projectRoles,
       });
-      navigate("/login/mfa-setup", {
-        state: { mfaSetup: res.mfaSetup, from: "/dashboard", welcome: { kind: "direct" } },
-      });
+      if (res.status === "authenticated") {
+        // MFA disabled — account created and logged in already.
+        navigate("/dashboard", { replace: true, state: { welcome: { kind: "direct" } } });
+      } else {
+        navigate("/login/mfa-setup", {
+          state: { mfaSetup: res.mfaSetup, from: "/dashboard", welcome: { kind: "direct" } },
+        });
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         const payload = err.details as { allowedDomains?: string[] } | undefined;

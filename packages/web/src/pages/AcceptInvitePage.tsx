@@ -76,18 +76,20 @@ export function AcceptInvitePage() {
         `/api/invites/${encodeURIComponent(token)}/accept`,
         { name, password }
       );
-      navigate("/login/mfa-setup", {
-        state: {
-          mfaSetup: res.mfaSetup,
-          from: "/dashboard",
-          welcome: {
-            kind: "invite",
-            buName: context?.bu?.name,
-            role: context?.projectRole ?? null,
-            inviter: context?.invitedBy?.name,
-          },
-        },
-      });
+      const welcome = {
+        kind: "invite" as const,
+        buName: context?.bu?.name,
+        role: context?.projectRole ?? null,
+        inviter: context?.invitedBy?.name,
+      };
+      if (res.status === "authenticated") {
+        // MFA disabled — account created and logged in already.
+        navigate("/dashboard", { replace: true, state: { welcome } });
+      } else {
+        navigate("/login/mfa-setup", {
+          state: { mfaSetup: res.mfaSetup, from: "/dashboard", welcome },
+        });
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not accept invitation");
       setSubmitting(false);

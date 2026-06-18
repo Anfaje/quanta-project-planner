@@ -57,6 +57,10 @@ primary_region = "ord"  # Chicago — matches the user's location
 [env]
   NODE_ENV = "production"
   API_PORT = "4000"
+  # TEMPORARY: two-factor auth is disabled while we test core functionality.
+  # Re-enable by setting this to "true" or removing the line. Tracked in
+  # GitHub issue #1 "Re-enable MFA on signup, login, and invite acceptance".
+  MFA_ENABLED = "false"
   # WEB_URL is intentionally not set here — it's a secret so it can be
   # rotated without re-deploying code. Set it via `fly secrets set`.
 

@@ -5,6 +5,7 @@ import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
 import { acceptInviteSchema } from "../utils/validation";
 import { generateTOTPSecret, encryptSecret } from "../utils/totp";
+import { mfaEnabled } from "../lib/mfa";
 import { logChange } from "../services/auditLog";
 
 /**
@@ -88,11 +89,12 @@ router.post("/:token/accept", async (req: Request, res: Response) => {
 
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
 
-  // Generate TOTP secret up front so we can return it in the response —
-  // same shape as /api/auth/register to let the frontend reuse its MFA setup
-  // screen without a code fork.
-  const { secret, uri } = generateTOTPSecret(invite.email);
-  const encryptedSecret = encryptSecret(secret);
+  // When MFA is enabled, generate the TOTP secret up front so we can return it
+  // in the response — same shape as /api/auth/register, so the frontend reuses
+  // its MFA setup screen without a code fork. When disabled, skip it: the user
+  // is created with no secret and logged straight in.
+  const totp = mfaEnabled() ? generateTOTPSecret(invite.email) : null;
+  const encryptedSecret = totp ? encryptSecret(totp.secret) : null;
 
   try {
     const user = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -127,6 +129,25 @@ router.post("/:token/accept", async (req: Request, res: Response) => {
       changedBy: invite.invitedBy,
     });
 
+    if (!totp) {
+      // MFA temporarily disabled: log the invitee straight in.
+      req.session.userId = user.id;
+      logger.info(
+        { userId: user.id, email: invite.email, inviteId: invite.id },
+        "Invite accepted (MFA disabled)"
+      );
+      return res.status(201).json({
+        status: "authenticated",
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          roles: user.roles,
+          projectRoles: user.projectRoles,
+        },
+      });
+    }
+
     // Arm the MFA-pending flag so the client can go straight to the TOTP
     // setup screen with a session in-flight (same as /auth/login's
     // mfa_setup_required path).
@@ -140,7 +161,7 @@ router.post("/:token/accept", async (req: Request, res: Response) => {
 
     res.status(201).json({
       status: "mfa_setup_required",
-      mfaSetup: { qrUri: uri, manualKey: secret },
+      mfaSetup: { qrUri: totp.uri, manualKey: totp.secret },
       user: {
         id: user.id,
         email: user.email,
