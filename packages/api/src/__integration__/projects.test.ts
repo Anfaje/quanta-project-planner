@@ -572,3 +572,98 @@ describe("Project sharing", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// Assignment business-unit snapshot — stores the BU CODE, not the id
+// ═══════════════════════════════════════════════════════════════
+
+describe("Assignment business-unit snapshot", () => {
+  it("stores the BU code (not its id) on wizard-created assignments", async () => {
+    const bu = await getDefaultBu(prisma); // code "BU-A"
+    const account = await getDefaultAccount(prisma);
+    const pm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const member = await seedUser(prisma, { buId: bu.id });
+    const agent = await authenticateAs(app, pm.email);
+
+    const res = await agent
+      .post("/api/projects")
+      .send({
+        name: "BU Code Test",
+        accountId: account.id,
+        owningBuId: bu.id,
+        projectCode: "BUCODE-1",
+        startDate: "2026-03-01",
+        endDate: "2026-03-15",
+        contingencyPct: 0.1,
+        assignments: [{ userId: member.id, projectRole: "iOS Dev", billRate: 150, costRate: 90 }],
+        plannedHours: [],
+        saveAsDraft: true,
+      })
+      .expect(201);
+
+    const a = await prisma.resourceAssignment.findFirst({
+      where: { projectId: res.body.projectId, userId: member.id },
+    });
+    expect(a?.businessUnit).toBe(bu.code);
+    expect(a?.businessUnit).not.toBe(bu.id);
+  });
+
+  it("stores the BU code when an assignment is added later", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const owner = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const member = await seedUser(prisma, { buId: bu.id });
+    // A draft owned by the PM: the owner can add assignments to it.
+    const project = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: owner.id,
+      status: "draft",
+    });
+    const agent = await authenticateAs(app, owner.email);
+
+    await agent
+      .post(`/api/projects/${project.id}/assignments`)
+      .send({ userId: member.id, projectRole: "Backend", billRate: 150, costRate: 90 })
+      .expect(201);
+
+    const a = await prisma.resourceAssignment.findFirst({
+      where: { projectId: project.id, userId: member.id },
+    });
+    expect(a?.businessUnit).toBe(bu.code);
+  });
+
+  it("backfill converts an id-valued business_unit to the BU code (idempotent)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const owner = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const member = await seedUser(prisma, { buId: bu.id });
+    const project = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: owner.id,
+      status: "active",
+    });
+    // Simulate the old bug: store the BU id in business_unit.
+    const broken = await prisma.resourceAssignment.create({
+      data: {
+        projectId: project.id,
+        userId: member.id,
+        projectRole: "Dev",
+        billRate: 100,
+        costRate: 50,
+        businessUnit: bu.id,
+      },
+    });
+
+    const sql = `UPDATE "resource_assignments" AS ra SET "business_unit" = bu."code" FROM "business_units" AS bu WHERE ra."business_unit" = bu."id";`;
+    await prisma.$executeRawUnsafe(sql);
+    const fixed = await prisma.resourceAssignment.findUnique({ where: { id: broken.id } });
+    expect(fixed?.businessUnit).toBe(bu.code);
+
+    // Running again changes nothing — values are now codes, not ids.
+    await prisma.$executeRawUnsafe(sql);
+    const again = await prisma.resourceAssignment.findUnique({ where: { id: broken.id } });
+    expect(again?.businessUnit).toBe(bu.code);
+  });
+});

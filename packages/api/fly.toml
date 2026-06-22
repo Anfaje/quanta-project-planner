@@ -48,7 +48,7 @@ primary_region = "ord"  # Chicago — matches the user's location
   # --skip-generate: the client was generated in the Dockerfile builder
   # --accept-data-loss: required when db push detects destructive changes;
   #   the warning is for awareness — we don't have prod data yet so empty
-  release_command = "npx prisma db push --skip-generate --accept-data-loss"
+  release_command = "sh -c 'npx prisma db push --skip-generate --accept-data-loss && npx prisma db execute --schema prisma/schema.prisma --file prisma/backfill_business_unit.sql'"
   strategy        = "rolling"
 
 [build]

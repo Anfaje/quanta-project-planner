@@ -388,12 +388,12 @@ router.post("/", async (req: Request, res: Response) => {
   const userIds = data.assignments.map((a) => a.userId);
   const users = await prisma.user.findMany({
     where: { id: { in: userIds }, isActive: true },
-    select: { id: true, primaryBuId: true },
+    select: { id: true, primaryBu: { select: { code: true } } },
   });
   if (users.length !== userIds.length) {
     return res.status(400).json({ error: "One or more assigned users not found or inactive" });
   }
-  const userBuMap = new Map(users.map((u) => [u.id, u.primaryBuId]));
+  const userBuMap = new Map(users.map((u) => [u.id, u.primaryBu?.code ?? ""]));
 
   const startDate = new Date(data.startDate + "T00:00:00Z");
   const endDate = new Date(data.endDate + "T00:00:00Z");
@@ -915,7 +915,10 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
 
   const data = parsed.data;
 
-  const targetUser = await prisma.user.findUnique({ where: { id: data.userId } });
+  const targetUser = await prisma.user.findUnique({
+    where: { id: data.userId },
+    include: { primaryBu: { select: { code: true } } },
+  });
   if (!targetUser || !targetUser.isActive) {
     return res.status(400).json({ error: "User not found or inactive" });
   }
@@ -935,7 +938,7 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
         projectRole: data.projectRole,
         billRate: new Prisma.Decimal(data.billRate),
         costRate: new Prisma.Decimal(data.costRate),
-        businessUnit: targetUser.primaryBuId,
+        businessUnit: targetUser.primaryBu?.code ?? "",
       },
     });
     if (totalWeeks > 0) {
