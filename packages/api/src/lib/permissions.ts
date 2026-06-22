@@ -197,6 +197,42 @@ export function canCreateProject(
 }
 
 /**
+ * Who can approve a draft → active.
+ *
+ * Per product decision: either an AA (platform-wide) or the BUL of the draft's
+ * OWNING business unit. Either single approval is sufficient. A user can never
+ * approve their own draft — approval is a second pair of eyes by definition, so
+ * the creator is excluded even if they hold AA/BUL.
+ */
+export function canApproveDraft(
+  user: AuthUser,
+  project: { owningBuId: string; createdById: string }
+): boolean {
+  if (project.createdById === user.id) return false; // no self-approval
+  if (user.roles.includes(Role.AA)) return true;
+  if (user.roles.includes(Role.BUL) && project.owningBuId === user.primaryBuId) return true;
+  return false;
+}
+
+/**
+ * Who can view a draft. Drafts are NOT visible via the normal project-access
+ * paths (they're excluded from the main list and all aggregations). Visibility
+ * is limited to: the owner, anyone explicitly invited as a reviewer, any AA
+ * (oversight), and the owning-BU BUL (so approvers get a queue without needing
+ * to be explicitly shared).
+ */
+export function canAccessDraft(
+  user: AuthUser,
+  project: { owningBuId: string; createdById: string; reviewerUserIds?: string[] }
+): boolean {
+  if (project.createdById === user.id) return true;
+  if (project.reviewerUserIds?.includes(user.id)) return true;
+  if (user.roles.includes(Role.AA)) return true;
+  if (user.roles.includes(Role.BUL) && project.owningBuId === user.primaryBuId) return true;
+  return false;
+}
+
+/**
  * Check if a user can manage (edit/archive) a project.
  *
  * Requires a manage-capable role AND access to the project. The caller is

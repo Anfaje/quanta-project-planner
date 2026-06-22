@@ -19,6 +19,7 @@ enum ProjectStatus {
   on_hold
   complete
   archived
+  draft
 }
 
 enum Role {
@@ -51,6 +52,8 @@ model User {
   assignments      ResourceAssignment[]
   managedAccounts  AccountManager[]
   projectsCreated  Project[]        @relation("ProjectCreator")
+  reviewingProjects ProjectReviewer[] @relation("ProjectReviewerUser")
+  reviewerAdds     ProjectReviewer[] @relation("ProjectReviewerAddedBy")
   auditLogs        AuditLog[]       @relation("AuditActor")
   domainsAdded     DomainWhitelist[] @relation("DomainAdder")
   invitesSent      UserInvite[]     @relation("InviteSender")
@@ -143,6 +146,7 @@ model Project {
   // Relations
   assignments ResourceAssignment[]
   shares      ProjectShare[]
+  reviewers   ProjectReviewer[]
 
   @@index([accountId, owningBuId, status])
   @@map("projects")
@@ -161,6 +165,25 @@ model ProjectShare {
   @@unique([projectId, sharedWithBuId])
   @@index([sharedWithBuId])
   @@map("project_shares")
+}
+
+/// User-level review invitations on a draft project. Distinct from ProjectShare
+/// (which is BU-level): this is "I want these specific colleagues to review my
+/// draft". Approval rights are derived from role (see canApproveDraft), not from
+/// this table — a reviewer who lacks AA/BUL mandate can look but not approve.
+model ProjectReviewer {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  userId     String   @map("user_id")
+  addedById  String   @map("added_by")
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User     @relation("ProjectReviewerUser", fields: [userId], references: [id])
+  addedBy    User     @relation("ProjectReviewerAddedBy", fields: [addedById], references: [id])
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_reviewers")
 }
 
 // ── Resource Assignment ──

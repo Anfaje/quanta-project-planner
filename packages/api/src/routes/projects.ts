@@ -5,6 +5,8 @@ import { logger } from "../lib/logger";
 import { requireAuth } from "../middleware/auth";
 import {
   canAccessProject,
+  canApproveDraft,
+  canAccessDraft,
   canCreateProject,
   canEditHours,
   canLockWeeks,
@@ -37,6 +39,8 @@ import {
   hoursImportSchema,
   shareProjectSchema,
   unlockWeekSchema,
+  addReviewersSchema,
+  rejectDraftSchema,
 } from "../utils/validation";
 
 const router = Router();
@@ -56,10 +60,14 @@ router.get("/", async (req: Request, res: Response) => {
   const accessFilter = buildProjectAccessFilter(user);
 
   const statuses = ([] as string[]).concat((req.query.status as any) ?? []);
+  // Drafts never appear in the main list — they have a dedicated endpoint
+  // (GET /api/projects/drafts) with their own access rules. Strip "draft" from
+  // any requested filter, and exclude it by default otherwise.
+  const requested = statuses.filter((s) => s !== "draft");
   const statusFilter =
-    statuses.length > 0
-      ? { status: { in: statuses as any[] } }
-      : {};
+    requested.length > 0
+      ? { status: { in: requested as any[] } }
+      : { status: { not: "draft" as any } };
 
   const projects = await prisma.project.findMany({
     where: { AND: [accessFilter, statusFilter] },
@@ -110,6 +118,73 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/projects/drafts
+ * Draft projects visible to the caller: their own drafts, drafts shared with
+ * them as a reviewer, plus (for approvers) drafts they have mandate over — any
+ * draft for an AA, owning-BU drafts for a BUL. MUST be registered before the
+ * "/:id" route so "drafts" isn't captured as an id.
+ */
+router.get("/drafts", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+
+  const orClauses: Prisma.ProjectWhereInput[] = [
+    { createdById: user.id },
+    { reviewers: { some: { userId: user.id } } },
+  ];
+  if (user.roles.includes(Role.BUL)) {
+    orClauses.push({ owningBuId: user.primaryBuId });
+  }
+  // AA sees every draft; everyone else is scoped by the OR-union above.
+  const accessWhere: Prisma.ProjectWhereInput = user.roles.includes(Role.AA)
+    ? {}
+    : { OR: orClauses };
+
+  const drafts = await prisma.project.findMany({
+    where: { AND: [{ status: "draft" }, accessWhere] },
+    select: {
+      id: true,
+      name: true,
+      projectCode: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+      createdById: true,
+      account: { select: { id: true, name: true, code: true } },
+      owningBu: { select: { id: true, code: true, name: true } },
+      createdBy: { select: { id: true, name: true, email: true } },
+      reviewers: {
+        select: { user: { select: { id: true, name: true, email: true } } },
+      },
+      _count: { select: { assignments: true } },
+      updatedAt: true,
+    },
+    orderBy: [{ updatedAt: "desc" }],
+  });
+
+  const rows = drafts.map((p) => ({
+    id: p.id,
+    name: p.name,
+    projectCode: p.projectCode,
+    status: p.status,
+    startDate: p.startDate,
+    endDate: p.endDate,
+    account: p.account,
+    owningBu: p.owningBu,
+    createdBy: p.createdBy,
+    reviewers: p.reviewers.map((r) => r.user),
+    resourceCount: p._count.assignments,
+    updatedAt: p.updatedAt,
+    isOwner: p.createdById === user.id,
+    canApprove: canApproveDraft(user, {
+      owningBuId: p.owningBu.id,
+      createdById: p.createdById,
+    }),
+  }));
+
+  res.json({ drafts: rows });
+});
+
+/**
  * GET /api/projects/:id
  * Project detail with assignments + computed financials (scoped).
  */
@@ -118,7 +193,27 @@ router.get("/:id", async (req: Request, res: Response) => {
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
 
-  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+  if (ctx.status === "draft") {
+    // Drafts use their own access rules (owner / reviewer / AA / owning-BU BUL),
+    // not the assignment-based path. Load the bits canAccessDraft needs.
+    const meta = await prisma.project.findUnique({
+      where: { id: ctx.id },
+      select: { createdById: true, reviewers: { select: { userId: true } } },
+    });
+    const reviewerUserIds = meta?.reviewers.map((r) => r.userId) ?? [];
+    if (
+      !meta ||
+      !canAccessDraft(user, {
+        owningBuId: ctx.owningBuId,
+        createdById: meta.createdById,
+        reviewerUserIds,
+      })
+    ) {
+      return res.status(403).json({ error: "No access to this draft" });
+    }
+  } else if (
+    !canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })
+  ) {
     return res.status(403).json({ error: "No access to this project" });
   }
 
@@ -130,6 +225,9 @@ router.get("/:id", async (req: Request, res: Response) => {
       createdBy: { select: { id: true, name: true, email: true } },
       shares: {
         include: { sharedWithBu: { select: { id: true, code: true, name: true } } },
+      },
+      reviewers: {
+        include: { user: { select: { id: true, name: true, email: true } } },
       },
       assignments: {
         include: {
@@ -222,6 +320,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       account: project.account,
       owningBu: project.owningBu,
       sharedWithBus: project.shares.map((s) => s.sharedWithBu),
+      reviewers: project.reviewers.map((r) => r.user),
       createdBy: project.createdBy,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
@@ -232,6 +331,16 @@ router.get("/:id", async (req: Request, res: Response) => {
       canManage: canManageProject(user),
       canManagePlan: canManagePlan(user),
       canLockWeeks: canLockWeeks(user),
+      isDraft: project.status === "draft",
+      canApproveDraft:
+        project.status === "draft" &&
+        canApproveDraft(user, {
+          owningBuId: project.owningBuId,
+          createdById: project.createdById,
+        }),
+      canManageReviewers:
+        project.status === "draft" &&
+        (project.createdById === user.id || user.roles.includes(Role.AA)),
     },
   });
 });
@@ -313,7 +422,7 @@ router.post("/", async (req: Request, res: Response) => {
           contingencyPct: new Prisma.Decimal(data.contingencyPct),
           description: data.description,
           createdById: user.id,
-          status: "active",
+          status: data.saveAsDraft ? "draft" : "active",
         },
       });
 
@@ -350,15 +459,193 @@ router.post("/", async (req: Request, res: Response) => {
     });
 
     await logChanges("Project", result.id, user.id, [
-      { field: "created", oldValue: null, newValue: JSON.stringify({ name: result.name, code: result.projectCode }) },
+      {
+        field: "created",
+        oldValue: null,
+        newValue: JSON.stringify({ name: result.name, code: result.projectCode, status: result.status }),
+      },
     ]);
 
-    logger.info({ projectId: result.id, code: result.projectCode, actor: user.id }, "Project created");
-    res.status(201).json({ projectId: result.id, projectCode: result.projectCode });
+    logger.info(
+      { projectId: result.id, code: result.projectCode, status: result.status, actor: user.id },
+      "Project created"
+    );
+    res.status(201).json({ projectId: result.id, projectCode: result.projectCode, status: result.status });
   } catch (err: any) {
     logger.error({ err }, "Failed to create project");
     res.status(500).json({ error: "Failed to create project" });
   }
+});
+
+// =====================================================================
+// Draft workflow: reviewers (share), approve, reject
+// =====================================================================
+
+/**
+ * POST /api/projects/:id/reviewers   { userIds: [...] }
+ * Invite colleagues to review a draft. Owner-only (or AA). Draft-only.
+ * Approval rights are NOT granted here — they come from role (canApproveDraft).
+ */
+router.post("/:id/reviewers", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = addReviewersSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, status: true, createdById: true },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (project.status !== "draft") {
+    return res.status(409).json({ error: "Reviewers can only be added to draft projects" });
+  }
+  if (project.createdById !== user.id && !user.roles.includes(Role.AA)) {
+    return res.status(403).json({ error: "Only the draft owner can manage reviewers" });
+  }
+
+  // Don't add the owner as their own reviewer; validate the rest exist + active.
+  const userIds = [...new Set(parsed.data.userIds)].filter((id) => id !== project.createdById);
+  if (userIds.length === 0) {
+    return res.status(400).json({ error: "No valid reviewers to add" });
+  }
+  const found = await prisma.user.findMany({
+    where: { id: { in: userIds }, isActive: true },
+    select: { id: true },
+  });
+  if (found.length !== userIds.length) {
+    return res.status(400).json({ error: "One or more users not found or inactive" });
+  }
+
+  await prisma.projectReviewer.createMany({
+    data: userIds.map((uid) => ({ projectId: project.id, userId: uid, addedById: user.id })),
+    skipDuplicates: true,
+  });
+  await logChanges("Project", project.id, user.id, [
+    { field: "reviewers.added", oldValue: null, newValue: JSON.stringify(userIds) },
+  ]);
+
+  const reviewers = await prisma.projectReviewer.findMany({
+    where: { projectId: project.id },
+    include: { user: { select: { id: true, name: true, email: true } } },
+  });
+  res.json({ reviewers: reviewers.map((r) => r.user) });
+});
+
+/**
+ * DELETE /api/projects/:id/reviewers/:userId
+ * Remove a reviewer. Owner-only (or AA).
+ */
+router.delete("/:id/reviewers/:userId", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, createdById: true },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (project.createdById !== user.id && !user.roles.includes(Role.AA)) {
+    return res.status(403).json({ error: "Only the draft owner can manage reviewers" });
+  }
+  await prisma.projectReviewer.deleteMany({
+    where: { projectId: project.id, userId: req.params.userId },
+  });
+  res.status(204).end();
+});
+
+/**
+ * POST /api/projects/:id/approve
+ * Flip a draft → active. AA or owning-BU BUL only; never the creator. Re-validates
+ * references at approval time since they can drift while a draft sits.
+ */
+router.post("/:id/approve", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      status: true,
+      owningBuId: true,
+      createdById: true,
+      projectCode: true,
+      account: { select: { isActive: true } },
+      owningBu: { select: { isActive: true } },
+      assignments: { select: { user: { select: { isActive: true } } } },
+    },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (project.status !== "draft") {
+    return res.status(409).json({ error: "Only draft projects can be approved" });
+  }
+  if (!canApproveDraft(user, { owningBuId: project.owningBuId, createdById: project.createdById })) {
+    return res.status(403).json({ error: "You do not have approval rights for this draft" });
+  }
+
+  // Re-validate: things may have changed since the draft was created.
+  if (!project.account?.isActive) {
+    return res.status(409).json({ error: "Account is inactive; cannot approve" });
+  }
+  if (!project.owningBu?.isActive) {
+    return res.status(409).json({ error: "Owning business unit is inactive; cannot approve" });
+  }
+  if (project.assignments.some((a) => !a.user?.isActive)) {
+    return res
+      .status(409)
+      .json({ error: "One or more assigned users are inactive; update the draft before approving" });
+  }
+  // Project code uniqueness is already enforced by the @unique constraint — the
+  // code was reserved at draft-creation time, so no clash is possible here.
+
+  const updated = await prisma.project.update({
+    where: { id: project.id },
+    data: { status: "active" },
+  });
+  await logChanges("Project", project.id, user.id, [
+    { field: "status", oldValue: "draft", newValue: "active" },
+    {
+      field: "draft.approved",
+      oldValue: null,
+      newValue: JSON.stringify({ approver: user.id, code: project.projectCode }),
+    },
+  ]);
+  logger.info({ projectId: project.id, approver: user.id }, "Draft approved -> active");
+  res.json({ projectId: updated.id, status: updated.status });
+});
+
+/**
+ * POST /api/projects/:id/reject   { reason? }
+ * Decline a draft. AA or owning-BU BUL only; never the creator. The draft stays a
+ * draft (the owner revises and it can be approved later); the reason is recorded
+ * for the owner. Comments beyond this are handled offline (product decision).
+ */
+router.post("/:id/reject", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = rejectDraftSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, status: true, owningBuId: true, createdById: true },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (project.status !== "draft") {
+    return res.status(409).json({ error: "Only draft projects can be rejected" });
+  }
+  if (!canApproveDraft(user, { owningBuId: project.owningBuId, createdById: project.createdById })) {
+    return res.status(403).json({ error: "You do not have approval rights for this draft" });
+  }
+
+  await logChanges("Project", project.id, user.id, [
+    {
+      field: "draft.rejected",
+      oldValue: null,
+      newValue: JSON.stringify({ reviewer: user.id, reason: parsed.data.reason ?? null }),
+    },
+  ]);
+  logger.info({ projectId: project.id, reviewer: user.id }, "Draft rejected (remains draft)");
+  res.json({ projectId: project.id, status: "draft", rejected: true });
 });
 
 /**

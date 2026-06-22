@@ -88,6 +88,7 @@ export const createProjectSchema = z
     description: z.string().max(2000).optional(),
     assignments: z.array(wizardAssignmentSchema).min(1, "At least one resource is required"),
     plannedHours: z.array(wizardPlannedHourSchema).default([]),
+    saveAsDraft: z.boolean().optional().default(false),
   })
   .refine((d) => new Date(d.startDate) <= new Date(d.endDate), {
     message: "End date must be on or after start date",
@@ -108,6 +109,15 @@ export const updateProjectSchema = z.object({
   contingencyPct: z.number().min(0).max(1).optional(),
   description: z.string().max(2000).nullable().optional(),
   status: z.enum(["active", "on_hold", "complete", "archived"]).optional(),
+});
+
+// Draft workflow ---------------------------------------------------------
+export const addReviewersSchema = z.object({
+  userIds: z.array(z.string().uuid()).min(1, "At least one user required").max(50),
+});
+
+export const rejectDraftSchema = z.object({
+  reason: z.string().max(1000).optional(),
 });
 
 export const createAssignmentSchema = z.object({
