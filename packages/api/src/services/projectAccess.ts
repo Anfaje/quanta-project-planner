@@ -55,6 +55,7 @@ export interface ProjectContext {
   accountId: string;
   owningBuId: string;
   status: string;
+  createdById: string;
   startDate: Date;
   endDate: Date;
   contingencyPct: Prisma.Decimal;
@@ -83,6 +84,7 @@ export async function loadProjectContext(
       accountId: true,
       owningBuId: true,
       status: true,
+      createdById: true,
       startDate: true,
       endDate: true,
       contingencyPct: true,
@@ -102,6 +104,7 @@ export async function loadProjectContext(
     accountId: project.accountId,
     owningBuId: project.owningBuId,
     status: project.status,
+    createdById: project.createdById,
     startDate: project.startDate,
     endDate: project.endDate,
     contingencyPct: project.contingencyPct,

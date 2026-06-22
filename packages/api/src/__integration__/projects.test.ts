@@ -382,6 +382,69 @@ describe("Draft approval workflow", () => {
     const draftIds = drafts.body.drafts.map((d: { id: string }) => d.id);
     expect(draftIds).toContain(draft.id);
   });
+
+  it("draft owner who is NOT assigned can still modify the draft", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const owner = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const someoneElse = await seedUser(prisma, { buId: bu.id });
+    const draft = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: owner.id,
+      status: "draft",
+      assignments: [{ userId: someoneElse.id, projectRole: "iOS Dev" }], // owner not assigned
+    });
+
+    const agent = await authenticateAs(app, owner.email);
+    await agent.patch(`/api/projects/${draft.id}`).send({ name: "Revised Name" }).expect(200);
+
+    const inDb = await prisma.project.findUnique({ where: { id: draft.id } });
+    expect(inDb?.name).toBe("Revised Name");
+  });
+
+  it("PATCH cannot flip a draft to active (activation is approval-only)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const owner = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const draft = await seedDraft(prisma, { ownerId: owner.id, owningBuId: bu.id, accountId: account.id });
+
+    const agent = await authenticateAs(app, owner.email);
+    await agent.patch(`/api/projects/${draft.id}`).send({ status: "active" }).expect(400);
+
+    const inDb = await prisma.project.findUnique({ where: { id: draft.id } });
+    expect(inDb?.status).toBe("draft");
+  });
+
+  it("reject records feedback the owner sees; resubmit clears it (draft never deleted)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const owner = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const draft = await seedDraft(prisma, { ownerId: owner.id, owningBuId: bu.id, accountId: account.id });
+
+    const bulAgent = await authenticateAs(app, bul.email);
+    await bulAgent
+      .post(`/api/projects/${draft.id}/reject`)
+      .send({ reason: "Trim the contingency" })
+      .expect(200);
+
+    const ownerAgent = await authenticateAs(app, owner.email);
+    let drafts = await ownerAgent.get("/api/projects/drafts").expect(200);
+    let mine = drafts.body.drafts.find((d: { id: string }) => d.id === draft.id);
+    expect(mine.changesRequested).toBe(true);
+    expect(mine.rejectionNote).toBe("Trim the contingency");
+
+    // Draft still exists (reject does not delete).
+    const stillThere = await prisma.project.findUnique({ where: { id: draft.id } });
+    expect(stillThere?.status).toBe("draft");
+
+    await ownerAgent.post(`/api/projects/${draft.id}/resubmit`).expect(200);
+    drafts = await ownerAgent.get("/api/projects/drafts").expect(200);
+    mine = drafts.body.drafts.find((d: { id: string }) => d.id === draft.id);
+    expect(mine.changesRequested).toBe(false);
+    expect(mine.rejectionNote).toBeNull();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

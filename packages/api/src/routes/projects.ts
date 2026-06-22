@@ -150,6 +150,8 @@ router.get("/drafts", async (req: Request, res: Response) => {
       startDate: true,
       endDate: true,
       createdById: true,
+      rejectionNote: true,
+      rejectionAt: true,
       account: { select: { id: true, name: true, code: true } },
       owningBu: { select: { id: true, code: true, name: true } },
       createdBy: { select: { id: true, name: true, email: true } },
@@ -175,6 +177,9 @@ router.get("/drafts", async (req: Request, res: Response) => {
     reviewers: p.reviewers.map((r) => r.user),
     resourceCount: p._count.assignments,
     updatedAt: p.updatedAt,
+    rejectionNote: p.rejectionNote,
+    rejectionAt: p.rejectionAt,
+    changesRequested: p.rejectionAt != null,
     isOwner: p.createdById === user.id,
     canApprove: canApproveDraft(user, { owningBuId: p.owningBu.id }),
   }));
@@ -311,6 +316,8 @@ router.get("/:id", async (req: Request, res: Response) => {
       projectCode: project.projectCode,
       status: project.status,
       description: project.description,
+      rejectionNote: project.rejectionNote,
+      rejectionAt: project.rejectionAt,
       startDate: project.startDate,
       endDate: project.endDate,
       contingencyPct: Number(project.contingencyPct),
@@ -602,7 +609,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
 
   const updated = await prisma.project.update({
     where: { id: project.id },
-    data: { status: "active" },
+    data: { status: "active", rejectionNote: null, rejectionAt: null },
   });
   await logChanges("Project", project.id, user.id, [
     { field: "status", oldValue: "draft", newValue: "active" },
@@ -641,6 +648,13 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
     return res.status(403).json({ error: "You do not have approval rights for this draft" });
   }
 
+  // Keep the draft; record the feedback so the owner sees what to change before
+  // resubmitting. (Reject never deletes a draft.)
+  await prisma.project.update({
+    where: { id: project.id },
+    data: { rejectionNote: parsed.data.reason ?? "Changes requested.", rejectionAt: new Date() },
+  });
+
   await logChanges("Project", project.id, user.id, [
     {
       field: "draft.rejected",
@@ -650,6 +664,36 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
   ]);
   logger.info({ projectId: project.id, reviewer: user.id }, "Draft rejected (remains draft)");
   res.json({ projectId: project.id, status: "draft", rejected: true });
+});
+
+/**
+ * POST /api/projects/:id/resubmit
+ * Owner clears the "changes requested" feedback after revising, marking the draft
+ * ready for review again. Owner-only, draft-only.
+ */
+router.post("/:id/resubmit", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, status: true, createdById: true },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (project.status !== "draft") {
+    return res.status(409).json({ error: "Only draft projects can be resubmitted" });
+  }
+  if (project.createdById !== user.id) {
+    return res.status(403).json({ error: "Only the draft owner can resubmit it" });
+  }
+
+  await prisma.project.update({
+    where: { id: project.id },
+    data: { rejectionNote: null, rejectionAt: null },
+  });
+  await logChanges("Project", project.id, user.id, [
+    { field: "draft.resubmitted", oldValue: null, newValue: null },
+  ]);
+  logger.info({ projectId: project.id, owner: user.id }, "Draft resubmitted for review");
+  res.json({ projectId: project.id, status: "draft", resubmitted: true });
 });
 
 /**
@@ -666,13 +710,25 @@ router.patch("/:id", async (req: Request, res: Response) => {
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
 
-  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user)) {
+  const isDraftOwner = ctx.status === "draft" && ctx.createdById === user.id;
+  if (
+    !isDraftOwner &&
+    (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user))
+  ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
 
   if (ctx.status === "archived") {
     return res.status(409).json({ error: "Archived projects are read-only" });
+  }
+
+  // A draft's status is owned by the approval workflow. Block any status change
+  // here so a draft can only reach `active` through approve (never a PM's PATCH).
+  if (ctx.status === "draft" && parsed.data.status !== undefined) {
+    return res.status(400).json({
+      error: "A draft's status is set through approval — use approve / reject / resubmit.",
+    });
   }
 
   const data = parsed.data;
@@ -847,8 +903,12 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
 
-  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user)) {
+  const isDraftOwner = ctx.status === "draft" && ctx.createdById === user.id;
+  if (
+    !isDraftOwner &&
+    (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user))
+  ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
   if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
@@ -923,8 +983,12 @@ router.patch("/:id/assignments/:assignmentId", async (req: Request, res: Respons
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
 
-  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user)) {
+  const isDraftOwner = ctx.status === "draft" && ctx.createdById === user.id;
+  if (
+    !isDraftOwner &&
+    (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user))
+  ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
   if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
@@ -980,8 +1044,12 @@ router.delete("/:id/assignments/:assignmentId", async (req: Request, res: Respon
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
 
-  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user)) {
+  const isDraftOwner = ctx.status === "draft" && ctx.createdById === user.id;
+  if (
+    !isDraftOwner &&
+    (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user))
+  ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
   if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
@@ -1114,7 +1182,8 @@ router.put("/:id/hours", async (req: Request, res: Response) => {
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
 
-  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+  const isDraftOwner = ctx.status === "draft" && ctx.createdById === user.id;
+  if (!isDraftOwner && !canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
     return res.status(403).json({ error: "No access to this project" });
   }
   if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });

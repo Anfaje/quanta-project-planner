@@ -138,6 +138,11 @@ model Project {
   contingencyPct Decimal       @default(0.15) @map("contingency_pct") @db.Decimal(5, 4)
   status         ProjectStatus @default(active)
   description    String?
+  // Draft review feedback: set when an approver rejects a draft (the draft is
+  // NOT deleted — it stays a draft so the owner can revise). Cleared on resubmit
+  // or approval.
+  rejectionNote  String?       @map("rejection_note")
+  rejectionAt    DateTime?     @map("rejection_at")
   createdById    String        @map("created_by")
   createdBy      User          @relation("ProjectCreator", fields: [createdById], references: [id])
   createdAt      DateTime      @default(now()) @map("created_at")
