@@ -20,7 +20,11 @@ router.use(requireAuth);
  * GET /api/admin/users
  * BUL: sees own BU's users. AA: sees all.
  */
-router.get("/users", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
+// Read access spans the roles that can create projects (see canCreateProject):
+// the project-creation wizard loads the user, BU, and account lists from these
+// admin read endpoints. The write endpoints below stay AA-only (BU/account
+// management is admin-only); only the reads are opened up.
+router.get("/users", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (req: Request, res: Response) => {
   const user = req.authUser!;
   const isBULOnly = user.roles.includes(Role.BUL) && !user.roles.includes(Role.AA);
 
@@ -367,7 +371,8 @@ router.delete("/domains/:id", requireRoles(Role.AA), async (req: Request, res: R
 /**
  * GET /api/admin/bus
  */
-router.get("/bus", requireRoles(Role.BUL, Role.AA), async (_req: Request, res: Response) => {
+// Wizard reference read (see the GET /users note): project creators need the BU list.
+router.get("/bus", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (_req: Request, res: Response) => {
   const bus = await prisma.businessUnit.findMany({
     orderBy: { code: "asc" },
     include: {
@@ -435,7 +440,10 @@ router.put("/bus/:id/activate", requireRoles(Role.AA), async (req: Request, res:
 /**
  * GET /api/admin/accounts
  */
-router.get("/accounts", requireRoles(Role.AA), async (_req: Request, res: Response) => {
+// Wizard reference read (see the GET /users note): project creators need the
+// account list. This was AA-only, which blocked PM/BUL/AC from the wizard even
+// though canCreateProject permits them.
+router.get("/accounts", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (_req: Request, res: Response) => {
   const accounts = await prisma.account.findMany({
     orderBy: { name: "asc" },
     include: {
