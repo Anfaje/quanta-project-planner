@@ -42,6 +42,9 @@ const ProjectWizardPage = lazy(() =>
 const AdminConsolePage = lazy(() =>
   import("./pages/AdminConsolePage").then((m) => ({ default: m.AdminConsolePage }))
 );
+const DraftsPage = lazy(() =>
+  import("./pages/DraftsPage").then((m) => ({ default: m.DraftsPage }))
+);
 const AcceptInvitePage = lazy(() =>
   import("./pages/AcceptInvitePage").then((m) => ({ default: m.AcceptInvitePage }))
 );
@@ -96,6 +99,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ProjectWizardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects/drafts"
+            element={
+              <ProtectedRoute>
+                <DraftsPage />
               </ProtectedRoute>
             }
           />

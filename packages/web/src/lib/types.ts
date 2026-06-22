@@ -9,7 +9,7 @@
 
 export type Role = "IC" | "PM" | "AC" | "BUL" | "AA";
 
-export type ProjectStatus = "active" | "on_hold" | "complete" | "archived";
+export type ProjectStatus = "active" | "on_hold" | "complete" | "archived" | "draft";
 
 export type DashboardSection =
   | "my_hours"
@@ -163,6 +163,8 @@ export interface ProjectDetail {
     projectCode: string;
     status: ProjectStatus;
     description: string | null;
+    rejectionNote: string | null;
+    rejectionAt: string | null;
     startDate: string;
     endDate: string;
     contingencyPct: number;
@@ -170,6 +172,7 @@ export interface ProjectDetail {
     account: AccountLite;
     owningBu: BusinessUnitLite;
     sharedWithBus: BusinessUnitLite[];
+    reviewers: UserLite[];
     createdBy: UserLite;
     createdAt: string;
     updatedAt: string;
@@ -180,7 +183,31 @@ export interface ProjectDetail {
     canManage: boolean;
     canManagePlan: boolean;
     canLockWeeks: boolean;
+    isDraft: boolean;
+    canApproveDraft: boolean;
+    canManageReviewers: boolean;
   };
+}
+
+/** A row from GET /api/projects/drafts. */
+export interface DraftListItem {
+  id: string;
+  name: string;
+  projectCode: string;
+  status: ProjectStatus;
+  startDate: string;
+  endDate: string;
+  account: AccountLite;
+  owningBu: BusinessUnitLite;
+  createdBy: UserLite;
+  reviewers: UserLite[];
+  resourceCount: number;
+  updatedAt: string;
+  rejectionNote: string | null;
+  rejectionAt: string | null;
+  changesRequested: boolean;
+  isOwner: boolean;
+  canApprove: boolean;
 }
 
 // ── Hours Grid ──

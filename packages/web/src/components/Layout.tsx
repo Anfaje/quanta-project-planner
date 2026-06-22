@@ -21,6 +21,11 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", to: "/dashboard", show: () => true },
   { label: "Projects", to: "/projects", show: () => true },
+  {
+    label: "Drafts",
+    to: "/projects/drafts",
+    show: (roles) => roles.some((r) => ["PM", "BUL", "AC", "AA"].includes(r)),
+  },
   { label: "Admin", to: "/admin", show: (roles) => roles.includes("BUL") || roles.includes("AA") },
 ];
 
@@ -65,6 +70,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  end
                   className={({ isActive }) =>
                     `px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                       isActive ? "bg-indigo-50 text-indigo-700" : "text-gray-600 hover:text-gray-900 hover:bg-gray-50"

@@ -166,8 +166,12 @@ describe("ProjectWizardPage", () => {
     });
   });
 
-  it("end-to-end: completes all steps and posts the expected payload", async () => {
-    (api.post as any).mockResolvedValueOnce({ projectId: "p-new", projectCode: "BRA-1234" });
+  it("end-to-end: completes all steps, saves a draft, then opens the share dialog", async () => {
+    (api.post as any).mockResolvedValueOnce({
+      projectId: "p-new",
+      projectCode: "BRA-1234",
+      status: "draft",
+    });
     renderWithProviders(<ProjectWizardPage />);
     await screen.findByText(/Project name/i);
 
@@ -195,9 +199,9 @@ describe("ProjectWizardPage", () => {
     await screen.findByText(/Financial preview/i);
     await userEvent.click(screen.getByRole("button", { name: /continue/i }));
 
-    // Step 5 — Review + Create
+    // Step 5 — Review + Save as draft (a PM can't launch directly)
     await screen.findByRole("heading", { name: /^Review$/i });
-    await userEvent.click(screen.getByRole("button", { name: /create project/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save as draft/i }));
 
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
@@ -218,11 +222,15 @@ describe("ProjectWizardPage", () => {
           ],
           // No hours entered → plannedHours filtered to empty.
           plannedHours: [],
+          // PM path always saves a draft.
+          saveAsDraft: true,
         })
       );
     });
 
-    // On success the page navigates to the new project's detail.
+    // The share dialog opens; closing it navigates to the new draft.
+    const doneBtn = await screen.findByRole("button", { name: /done/i });
+    await userEvent.click(doneBtn);
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith("/projects/p-new");
     });

@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link } from "react-router-dom";
-import { api } from "../lib/api";
-import type { ProjectDetail } from "../lib/types";
+import { api, ApiError } from "../lib/api";
+import type { ProjectDetail, Me } from "../lib/types";
 import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
 import {
@@ -13,6 +13,8 @@ import {
   Alert,
   Badge,
   Button,
+  ConfirmModal,
+  PromptModal,
   PageHeader,
   TabPanel,
   Tabs,
@@ -28,6 +30,7 @@ import { HoursGridPanel } from "../components/HoursGridPanel";
 import { BurnChartPanel } from "../components/BurnChartPanel";
 import { FinancialsPanel } from "../components/FinancialsPanel";
 import { ShareProjectModal } from "../components/ShareProjectModal";
+import { ReviewerShareModal } from "../components/ReviewerShareModal";
 
 /**
  * Project detail — four-tab view: overview, hours, burn, financials.
@@ -101,7 +104,7 @@ export function ProjectDetailPage() {
         subtitle={`${p.projectCode} · ${p.account.name} · ${p.owningBu.name}`}
         actions={
           <>
-            {canShare && p.status !== "archived" && (
+            {canShare && p.status !== "archived" && p.status !== "draft" && (
               <Button variant="secondary" size="sm" onClick={() => setShareOpen(true)}>
                 Manage sharing
               </Button>
@@ -148,6 +151,8 @@ export function ProjectDetailPage() {
         />
       )}
 
+      {data.capabilities.isDraft && <DraftWorkflowPanel data={data} me={me} />}
+
       {/* ── Summary metrics ── */}
       <SummaryMetrics data={data} />
 
@@ -169,6 +174,148 @@ export function ProjectDetailPage() {
         </TabPanel>
       </div>
     </Layout>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Draft workflow panel (banner + approve / reject / resubmit / share)
+// ═══════════════════════════════════════════════════════════════
+
+function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
+  const qc = useQueryClient();
+  const p = data.project;
+  const caps = data.capabilities;
+  const isOwner = me.id === p.createdBy.id;
+
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [reviewerOpen, setReviewerOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["project", p.id] });
+    qc.invalidateQueries({ queryKey: ["drafts"] });
+  };
+  const onErr = (err: unknown) =>
+    setError(err instanceof ApiError ? err.message : "Something went wrong");
+
+  const approveMut = useMutation({
+    mutationFn: () => api.post(`/api/projects/${p.id}/approve`),
+    onSuccess: () => {
+      setApproveOpen(false);
+      setError(null);
+      invalidate();
+    },
+    onError: onErr,
+  });
+  const rejectMut = useMutation({
+    mutationFn: (reason?: string) => api.post(`/api/projects/${p.id}/reject`, { reason }),
+    onSuccess: () => {
+      setRejectOpen(false);
+      setError(null);
+      invalidate();
+    },
+    onError: onErr,
+  });
+  const resubmitMut = useMutation({
+    mutationFn: () => api.post(`/api/projects/${p.id}/resubmit`),
+    onSuccess: () => {
+      setError(null);
+      invalidate();
+    },
+    onError: onErr,
+  });
+
+  return (
+    <div className="mb-6 space-y-4">
+      {p.rejectionNote && (
+        <Alert tone="amber" title="Changes requested">
+          {p.rejectionNote}
+          {isOwner && " — make your changes, then resubmit for review."}
+        </Alert>
+      )}
+
+      <Card>
+        <CardBody>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold text-gray-900">Draft project</div>
+              <p className="text-xs text-gray-500 mt-0.5 max-w-xl">
+                This proposal doesn&apos;t affect cost or revenue yet.{" "}
+                {caps.canApproveDraft
+                  ? "Approve it to make it active and commit the planned hours."
+                  : "An AA or the owning BU's leader approves it to make it active."}
+              </p>
+              {p.reviewers.length > 0 && (
+                <div className="text-xs text-gray-500 mt-2">
+                  Reviewers: {p.reviewers.map((r) => r.name).join(", ")}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {caps.canManageReviewers && (
+                <Button variant="secondary" size="sm" onClick={() => setReviewerOpen(true)}>
+                  Share
+                </Button>
+              )}
+              {isOwner && p.rejectionNote && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => resubmitMut.mutate()}
+                  loading={resubmitMut.isPending}
+                >
+                  Resubmit
+                </Button>
+              )}
+              {caps.canApproveDraft && (
+                <>
+                  <Button variant="danger" size="sm" onClick={() => setRejectOpen(true)}>
+                    Reject
+                  </Button>
+                  <Button size="sm" onClick={() => setApproveOpen(true)}>
+                    Approve
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-3">
+              <Alert tone="rose">{error}</Alert>
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      <ConfirmModal
+        open={approveOpen}
+        title="Approve this draft?"
+        message="This activates the project and commits its planned hours — it will start counting toward cost, revenue, and capacity."
+        confirmLabel="Approve"
+        onConfirm={() => approveMut.mutate()}
+        onCancel={() => setApproveOpen(false)}
+        loading={approveMut.isPending}
+      />
+      <PromptModal
+        open={rejectOpen}
+        title="Request changes"
+        message="Optionally tell the owner what to change. The draft stays a draft so they can revise and resubmit."
+        placeholder="e.g. Trim the contingency to 12%"
+        submitLabel="Send back"
+        onSubmit={(v) => rejectMut.mutate(v.trim() || undefined)}
+        onCancel={() => setRejectOpen(false)}
+        loading={rejectMut.isPending}
+      />
+      <ReviewerShareModal
+        projectId={p.id}
+        reviewers={p.reviewers}
+        open={reviewerOpen}
+        onClose={() => setReviewerOpen(false)}
+      />
+    </div>
   );
 }
 

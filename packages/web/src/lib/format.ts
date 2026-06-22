@@ -91,6 +91,7 @@ export function statusColorClasses(status: string): string {
     case "on_hold": return "bg-amber-50 text-amber-700 border-amber-100";
     case "complete": return "bg-sky-50 text-sky-700 border-sky-100";
     case "archived": return "bg-gray-100 text-gray-600 border-gray-200";
+    case "draft": return "bg-violet-50 text-violet-700 border-violet-100";
     default: return "bg-gray-100 text-gray-600 border-gray-200";
   }
 }

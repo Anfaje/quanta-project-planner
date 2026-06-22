@@ -64,7 +64,12 @@ export function ProjectsListPage() {
         subtitle="Everything in your scope"
         actions={
           canCreate ? (
-            <Button onClick={() => navigate("/projects/new")}>New project</Button>
+            <>
+              <Button variant="secondary" onClick={() => navigate("/projects/drafts")}>
+                Drafts
+              </Button>
+              <Button onClick={() => navigate("/projects/new")}>New project</Button>
+            </>
           ) : undefined
         }
       />

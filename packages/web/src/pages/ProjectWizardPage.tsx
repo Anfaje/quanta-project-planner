@@ -22,6 +22,7 @@ import {
   Spinner,
 } from "../components/ui";
 import { formatDate, formatHours, formatMoney, formatPercent } from "../lib/format";
+import { ReviewerShareModal } from "../components/ReviewerShareModal";
 
 /**
  * Project creation wizard.
@@ -128,11 +129,20 @@ export function ProjectWizardPage() {
     plannedHours: new Map(),
   });
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // After "Save as draft" succeeds we hold the new draft's id to open the
+  // share dialog; closing it navigates to the draft.
+  const [draftToShare, setDraftToShare] = useState<string | null>(null);
+
+  // Only an AA, or the BUL of the owning BU, may launch a project directly.
+  // Everyone else (PMs) saves a draft for approval.
+  const canLaunchDirectly =
+    me.roles.includes("AA") ||
+    (me.roles.includes("BUL") && me.primaryBu?.id === state.owningBuId);
 
   const totalWeeks = countWeeks(state.startDate, state.endDate);
 
   const createMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (saveAsDraft: boolean) => {
       const payload = {
         name: state.name,
         accountId: state.accountId,
@@ -154,11 +164,20 @@ export function ProjectWizardPage() {
             return { userId, projectWeek: Number(weekStr), plannedHours: hours };
           })
           .filter((e) => e.plannedHours > 0),
+        saveAsDraft,
       };
-      return api.post<{ projectId: string; projectCode: string }>("/api/projects", payload);
+      return api.post<{ projectId: string; projectCode: string; status: string }>(
+        "/api/projects",
+        payload
+      );
     },
-    onSuccess: (res) => {
-      navigate(`/projects/${res.projectId}`);
+    onSuccess: (res, saveAsDraft) => {
+      if (saveAsDraft) {
+        // Prompt to share the new draft; navigation happens when the dialog closes.
+        setDraftToShare(res.projectId);
+      } else {
+        navigate(`/projects/${res.projectId}`);
+      }
     },
     onError: (err) => {
       setSubmitError(err instanceof ApiError ? err.message : "Failed to create project");
@@ -282,16 +301,44 @@ export function ProjectWizardPage() {
                 Continue
               </Button>
             ) : (
-              <Button
-                onClick={() => createMutation.mutate()}
-                loading={createMutation.isPending}
-                disabled={!stepValid(5)}
-              >
-                Create project
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={canLaunchDirectly ? "secondary" : "primary"}
+                  onClick={() => createMutation.mutate(true)}
+                  loading={createMutation.isPending && createMutation.variables === true}
+                  disabled={!stepValid(5) || createMutation.isPending}
+                >
+                  Save as draft
+                </Button>
+                {canLaunchDirectly && (
+                  <Button
+                    onClick={() => createMutation.mutate(false)}
+                    loading={createMutation.isPending && createMutation.variables === false}
+                    disabled={!stepValid(5) || createMutation.isPending}
+                  >
+                    Launch project
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         </>
+      )}
+
+      {draftToShare && (
+        <ReviewerShareModal
+          projectId={draftToShare}
+          reviewers={[]}
+          open={true}
+          onClose={() => {
+            const id = draftToShare;
+            setDraftToShare(null);
+            navigate(`/projects/${id}`);
+          }}
+          title="Draft saved — share it for review"
+          intro="Your draft is saved (it doesn't affect cost or revenue yet). Add the colleagues who should review it — they'll find it under “Shared with me” in Drafts, and you can also manage reviewers later from the draft page. An AA or your BU's leader approves it to make it active."
+          doneLabel="Done"
+        />
       )}
     </Layout>
   );
