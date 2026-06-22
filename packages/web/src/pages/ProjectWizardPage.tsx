@@ -23,6 +23,7 @@ import {
 } from "../components/ui";
 import { formatDate, formatHours, formatMoney, formatPercent } from "../lib/format";
 import { ReviewerShareModal } from "../components/ReviewerShareModal";
+import { effectiveCost, isCrossBu } from "../lib/constants";
 
 /**
  * Project creation wizard.
@@ -52,7 +53,9 @@ interface ResourceDraft {
   businessUnit: string; // denormalized (BU code)
   projectRole: string;
   billRate: number;
-  costRate: number;
+  costRate: number;     // effective cost (incl. cross-BU markup) — sent to API
+  baselineCost: number; // person's standing rate before any markup
+  costOverridden: boolean; // PM hand-edited the cost; don't auto-recompute it
 }
 
 interface WizardState {
@@ -493,7 +496,20 @@ function Step1Basics({
           <Field label="Owning business unit *">
             <SelectField
               value={state.owningBuId}
-              onChange={(v) => setState({ ...state, owningBuId: v })}
+              onChange={(v) => {
+                const newOwningBuCode = businessUnits.find((b) => b.id === v)?.code ?? "";
+                setState({
+                  ...state,
+                  owningBuId: v,
+                  // Re-apply (or drop) the cross-BU markup for resources the PM
+                  // hasn't hand-edited, now that the owning BU has changed.
+                  resources: state.resources.map((r) =>
+                    r.costOverridden
+                      ? r
+                      : { ...r, costRate: effectiveCost(r.baselineCost, r.businessUnit, newOwningBuCode) }
+                  ),
+                });
+              }}
               options={activeBus.map((b) => ({ value: b.id, label: `${b.code} · ${b.name}` }))}
               placeholder="Select a BU"
             />
@@ -574,6 +590,9 @@ function Step2Resources({
   const [search, setSearch] = useState("");
   const [buFilter, setBuFilter] = useState("");
 
+  // BU code of the project's owning BU — used to flag/markup cross-BU resources.
+  const owningBuCode = bus.find((b) => b.id === state.owningBuId)?.code ?? "";
+
   // users array is sorted by name on the API side already.
   const selectedIds = new Set(state.resources.map((r) => r.userId));
   const visibleUsers = users.filter((u) => {
@@ -592,6 +611,8 @@ function Step2Resources({
   const addResource = (u: AdminUser) => {
     if (selectedIds.has(u.id)) return;
     const buCode = u.primaryBu?.code ?? "";
+    const owningBuCode = bus.find((b) => b.id === state.owningBuId)?.code ?? "";
+    const baseline = u.costRate ?? 0;
     const newResource: ResourceDraft = {
       userId: u.id,
       name: u.name,
@@ -599,7 +620,9 @@ function Step2Resources({
       businessUnit: buCode,
       projectRole: u.projectRoles[0] ?? "",
       billRate: 175,
-      costRate: u.costRate ?? 0,
+      costRate: effectiveCost(baseline, buCode, owningBuCode),
+      baselineCost: baseline,
+      costOverridden: false,
     };
     setState({ ...state, resources: [...state.resources, newResource] });
   };
@@ -745,10 +768,18 @@ function Step2Resources({
                       step={5}
                       value={r.costRate}
                       onChange={(e) =>
-                        updateResource(r.userId, { costRate: Number(e.target.value) })
+                        updateResource(r.userId, {
+                          costRate: Number(e.target.value),
+                          costOverridden: true,
+                        })
                       }
                       className="w-full px-2 py-1.5 text-xs text-right tabular-nums border border-gray-200 rounded focus:outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100"
                     />
+                    {isCrossBu(r.businessUnit, owningBuCode) && (
+                      <div className="text-[10px] text-amber-600 mt-1 leading-tight">
+                        {r.costOverridden ? "cross-BU resource" : "incl. 18% cross-BU markup"}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

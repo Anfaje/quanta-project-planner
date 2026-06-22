@@ -47,6 +47,15 @@ const BUS: AdminBusinessUnit[] = [
     projectCount: 2,
     bul: null,
   },
+  {
+    id: "bu-2",
+    code: "EU-BER-FOXES",
+    name: "Berlin Foxes",
+    isActive: true,
+    userCount: 3,
+    projectCount: 1,
+    bul: null,
+  },
 ];
 const USERS: AdminUser[] = [
   {
@@ -76,6 +85,20 @@ const USERS: AdminUser[] = [
     createdAt: "2025-01-01",
     managedAccounts: [],
     projectCount: 1,
+  },
+  {
+    id: "u3",
+    email: "jordan@example.com",
+    name: "Jordan Cross",
+    costRate: 100,
+    primaryBu: { code: "EU-BER-FOXES", name: "Berlin Foxes" },
+    roles: ["IC"],
+    projectRoles: ["Backend"],
+    financialAccess: false,
+    isActive: true,
+    createdAt: "2025-01-01",
+    managedAccounts: [],
+    projectCount: 0,
   },
 ];
 
@@ -236,5 +259,47 @@ describe("ProjectWizardPage", () => {
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith("/projects/p-new");
     });
+  });
+
+  it("applies an 18% markup and labels it for a cross-BU resource", async () => {
+    renderWithProviders(<ProjectWizardPage />);
+    await screen.findByText(/Project name/i);
+
+    // Step 1: project is owned by US-ORD-OWLS (bu-1).
+    await userEvent.type(screen.getByLabelText(/project name/i), "Cross BU Test");
+    await userEvent.selectOptions(screen.getByLabelText(/account/i), "acc-1");
+    await userEvent.selectOptions(screen.getByLabelText(/owning business unit/i), "bu-1");
+    await userEvent.type(screen.getByLabelText(/start date/i), "2026-03-01");
+    await userEvent.type(screen.getByLabelText(/end date/i), "2026-03-15");
+    await userEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    // Step 2: Jordan is in EU-BER-FOXES — a different BU than the owner.
+    await screen.findByText(/Team directory/i);
+    await userEvent.click(screen.getByText("Jordan Cross"));
+
+    // Cost pre-fills to baseline + 18% (100 × 1.18 = 118) and is labelled.
+    expect(await screen.findByText(/incl\. 18% cross-BU markup/i)).toBeInTheDocument();
+    const spinbuttons = screen.getAllByRole("spinbutton"); // [bill, cost]
+    expect(spinbuttons[1]).toHaveValue(118);
+  });
+
+  it("uses the baseline (no markup) for a same-BU resource", async () => {
+    renderWithProviders(<ProjectWizardPage />);
+    await screen.findByText(/Project name/i);
+
+    await userEvent.type(screen.getByLabelText(/project name/i), "Same BU Test");
+    await userEvent.selectOptions(screen.getByLabelText(/account/i), "acc-1");
+    await userEvent.selectOptions(screen.getByLabelText(/owning business unit/i), "bu-1");
+    await userEvent.type(screen.getByLabelText(/start date/i), "2026-03-01");
+    await userEvent.type(screen.getByLabelText(/end date/i), "2026-03-15");
+    await userEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    // Maya is in US-ORD-OWLS — the same BU as the owner.
+    await screen.findByText(/Team directory/i);
+    await userEvent.click(screen.getByText("Maya Chen"));
+
+    expect(screen.queryByText(/cross-BU markup/i)).not.toBeInTheDocument();
+    const spinbuttons = screen.getAllByRole("spinbutton");
+    expect(spinbuttons[1]).toHaveValue(120); // Maya's baseline, unchanged
   });
 });

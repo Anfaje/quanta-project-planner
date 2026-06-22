@@ -48,6 +48,7 @@ function makeMe(over: Partial<Me>): Me {
 function detail(opts: {
   project?: Partial<ProjectDetail["project"]>;
   capabilities?: Partial<ProjectDetail["capabilities"]>;
+  assignments?: ProjectDetail["assignments"];
 } = {}): ProjectDetail {
   return {
     project: {
@@ -71,7 +72,7 @@ function detail(opts: {
       updatedAt: "2026-03-02",
       ...(opts.project ?? {}),
     },
-    assignments: [],
+    assignments: opts.assignments ?? [],
     financials: { totalPlannedHours: 100, totalActualHours: 0, eacHours: 100 },
     capabilities: {
       canManage: true,
@@ -161,5 +162,44 @@ describe("ProjectDetailPage — draft workflow", () => {
     expect(screen.queryByRole("button", { name: /^Approve$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Reject$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Resubmit/i })).not.toBeInTheDocument();
+  });
+
+  it("flags a cross-BU resource on the overview resources table", async () => {
+    h.me = makeMe({ id: "u-viewer", roles: ["PM"] });
+    mockGet(
+      detail({
+        project: { status: "active" },
+        capabilities: { isDraft: false },
+        assignments: [
+          {
+            id: "a1",
+            userId: "x1",
+            user: { id: "x1", name: "Local Person", email: "l@e.com" },
+            projectRole: "Engineer",
+            businessUnit: "US-ORD-OWLS", // same as the owning BU → no badge
+            plannedHours: 0,
+            actualHours: 0,
+          },
+          {
+            id: "a2",
+            userId: "x2",
+            user: { id: "x2", name: "Borrowed Person", email: "b@e.com" },
+            projectRole: "Engineer",
+            businessUnit: "EU-BER-FOXES", // a different BU → cross-BU badge
+            plannedHours: 0,
+            actualHours: 0,
+          },
+        ],
+      })
+    );
+
+    renderWithProviders(<ProjectDetailPage />, {
+      route: "/projects/p-draft",
+      path: "/projects/:id",
+    });
+
+    await screen.findByText("Borrowed Person");
+    // Exactly the borrowed resource is flagged.
+    expect(screen.getByText("cross-BU")).toBeInTheDocument();
   });
 });

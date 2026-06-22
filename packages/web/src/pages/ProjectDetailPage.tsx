@@ -431,6 +431,11 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                   <td className="px-6 py-3 text-gray-600">{a.projectRole}</td>
                   <td className="px-6 py-3">
                     <Badge>{a.businessUnit}</Badge>
+                    {a.businessUnit && a.businessUnit !== project.owningBu.code && (
+                      <Badge tone="amber" className="ml-1">
+                        cross-BU
+                      </Badge>
+                    )}
                   </td>
                   {assignments.some((x) => x.billRate !== undefined) && (
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
