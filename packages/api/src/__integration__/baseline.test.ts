@@ -191,7 +191,10 @@ describe("Plan lock on completion", () => {
       owningBuId: bu.id,
       createdBy: pm.id,
       status: "complete",
-      assignments: [{ userId: ic.id, projectRole: "Engineer" }],
+      assignments: [
+        { userId: pm.id, projectRole: "PM" },
+        { userId: ic.id, projectRole: "Engineer" },
+      ],
       seedHours: { plannedPerWeek: 5, actualPerWeek: 4 },
       totalWeeks: 4,
     });
