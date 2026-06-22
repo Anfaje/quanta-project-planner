@@ -4,7 +4,7 @@ import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
 import { requireAuth, requireRoles } from "../middleware/auth";
-import { updateRolesSchema, domainSchema, inviteSchema } from "../utils/validation";
+import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema } from "../utils/validation";
 import { logChanges, diffFields } from "../services/auditLog";
 
 const router = Router();
@@ -40,6 +40,7 @@ router.get("/users", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (r
       projectRoles: true,
       primaryBuId: true,
       financialAccess: true,
+      costRate: true,
       isActive: true,
       createdAt: true,
       primaryBu: { select: { code: true, name: true } },
@@ -59,6 +60,7 @@ router.get("/users", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (r
     projectRoles: u.projectRoles,
     primaryBu: u.primaryBu,
     financialAccess: u.financialAccess,
+    costRate: u.costRate != null ? Number(u.costRate) : null,
     isActive: u.isActive,
     createdAt: u.createdAt,
     managedAccounts: u.managedAccounts.map((m) => m.account),
@@ -66,6 +68,48 @@ router.get("/users", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (r
   }));
 
   res.json({ users: result });
+});
+
+/**
+ * PUT /api/admin/users/:id/cost-rate
+ * Set a user's standing fully-loaded cost rate (loaded salary + overhead).
+ * BUL: own-BU users only. AA: anyone. New projects snapshot this value;
+ * existing projects keep the rate captured when they were created.
+ */
+router.put("/users/:id/cost-rate", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
+  const actor = req.authUser!;
+  const parsed = updateCostRateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+
+  const target = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, primaryBuId: true, costRate: true },
+  });
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  // BUL may only set cost rates for users in their own business unit.
+  const isBULOnly = actor.roles.includes(Role.BUL) && !actor.roles.includes(Role.AA);
+  if (isBULOnly && target.primaryBuId !== actor.primaryBuId) {
+    return res
+      .status(403)
+      .json({ error: "You can only set cost rates for users in your own business unit" });
+  }
+
+  const newRate = parsed.data.costRate;
+  await prisma.user.update({ where: { id: target.id }, data: { costRate: newRate } });
+
+  await logChanges("User", target.id, actor.id, [
+    {
+      field: "cost_rate",
+      oldValue: target.costRate != null ? target.costRate.toString() : null,
+      newValue: newRate != null ? String(newRate) : null,
+    },
+  ]);
+  logger.info({ targetUser: target.id, actor: actor.id, costRate: newRate }, "Cost rate updated");
+
+  res.json({ id: target.id, costRate: newRate });
 });
 
 /**

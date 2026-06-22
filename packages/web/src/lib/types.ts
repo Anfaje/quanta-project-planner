@@ -401,6 +401,7 @@ export interface AdminUser {
   projectRoles: string[];
   primaryBu: { code: string; name: string } | null;
   financialAccess: boolean;
+  costRate: number | null;
   isActive: boolean;
   createdAt: string;
   managedAccounts: AccountLite[];

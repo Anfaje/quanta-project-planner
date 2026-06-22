@@ -174,3 +174,96 @@ describe("BU + Account create", () => {
     await bulAgent.post("/api/admin/accounts").send({ code: "X", name: "X" }).expect(403);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// PUT /api/admin/users/:id/cost-rate
+// ═══════════════════════════════════════════════════════════════
+
+describe("PUT /api/admin/users/:id/cost-rate", () => {
+  it("BUL sets the cost rate for a user in their own BU", async () => {
+    const bu = await getDefaultBu(prisma);
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const member = await seedUser(prisma, { buId: bu.id });
+    const agent = await authenticateAs(app, bul.email);
+
+    const res = await agent.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: 132.5 });
+    expect(res.status).toBe(200);
+
+    const updated = await prisma.user.findUnique({ where: { id: member.id } });
+    expect(Number(updated?.costRate)).toBe(132.5);
+  });
+
+  it("records the change in the audit log", async () => {
+    const bu = await getDefaultBu(prisma);
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const member = await seedUser(prisma, { buId: bu.id });
+    const agent = await authenticateAs(app, bul.email);
+
+    await agent.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: 100 }).expect(200);
+
+    const log = await prisma.auditLog.findFirst({
+      where: { entityType: "User", entityId: member.id, field: "cost_rate" },
+    });
+    expect(log).not.toBeNull();
+    expect(log?.newValue).toBe("100");
+  });
+
+  it("BUL cannot set the cost rate for a user in another BU (403)", async () => {
+    const buA = await getDefaultBu(prisma);
+    const buB = await prisma.businessUnit.findUnique({ where: { code: "BU-B" } });
+    const bul = await seedUser(prisma, { buId: buA.id, roles: ["BUL"] });
+    const otherMember = await seedUser(prisma, { buId: buB!.id });
+    const agent = await authenticateAs(app, bul.email);
+
+    const res = await agent.put(`/api/admin/users/${otherMember.id}/cost-rate`).send({ costRate: 100 });
+    expect(res.status).toBe(403);
+  });
+
+  it("AA can set the cost rate for a user in any BU", async () => {
+    const buB = await prisma.businessUnit.findUnique({ where: { code: "BU-B" } });
+    const member = await seedUser(prisma, { buId: buB!.id });
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+
+    await agent.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: 175 }).expect(200);
+    const updated = await prisma.user.findUnique({ where: { id: member.id } });
+    expect(Number(updated?.costRate)).toBe(175);
+  });
+
+  it("clearing the rate with null is allowed", async () => {
+    const bu = await getDefaultBu(prisma);
+    const member = await seedUser(prisma, { buId: bu.id });
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    await agent.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: 90 }).expect(200);
+    await agent.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: null }).expect(200);
+    const updated = await prisma.user.findUnique({ where: { id: member.id } });
+    expect(updated?.costRate).toBeNull();
+  });
+
+  it("rejects a negative cost rate (400)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const member = await seedUser(prisma, { buId: bu.id });
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const res = await agent.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: -5 });
+    expect(res.status).toBe(400);
+  });
+
+  it("a PM cannot set cost rates (403)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const pm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const member = await seedUser(prisma, { buId: bu.id });
+    const agent = await authenticateAs(app, pm.email);
+    const res = await agent.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: 100 });
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /api/admin/users includes costRate", async () => {
+    const bu = await getDefaultBu(prisma);
+    const member = await seedUser(prisma, { buId: bu.id });
+    const aa = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    await aa.put(`/api/admin/users/${member.id}/cost-rate`).send({ costRate: 144 }).expect(200);
+
+    const res = await aa.get("/api/admin/users").expect(200);
+    const row = res.body.users.find((u: { id: string }) => u.id === member.id);
+    expect(row.costRate).toBe(144);
+  });
+});

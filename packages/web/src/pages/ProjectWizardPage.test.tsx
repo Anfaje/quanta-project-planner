@@ -53,6 +53,7 @@ const USERS: AdminUser[] = [
     id: "u1",
     email: "maya@example.com",
     name: "Maya Chen",
+    costRate: 120,
     roles: ["IC"],
     projectRoles: ["iOS Dev"],
     primaryBu: { code: "US-ORD-OWLS", name: "Chicago Owls" },
@@ -66,6 +67,7 @@ const USERS: AdminUser[] = [
     id: "u2",
     email: "alex@example.com",
     name: "Alex Rivera",
+    costRate: 110,
     roles: ["IC"],
     projectRoles: ["Backend"],
     primaryBu: { code: "US-ORD-OWLS", name: "Chicago Owls" },
@@ -217,7 +219,7 @@ describe("ProjectWizardPage", () => {
               userId: "u1",
               projectRole: "iOS Dev",
               billRate: expect.any(Number),
-              costRate: expect.any(Number),
+              costRate: 120, // defaulted from Maya's standing cost rate
             }),
           ],
           // No hours entered → plannedHours filtered to empty.

@@ -20,6 +20,7 @@ import {
   FormInput,
   Modal,
   PageHeader,
+  PromptModal,
   Spinner,
   TabPanel,
   Tabs,
@@ -127,6 +128,16 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "users"] }),
   });
 
+  const [costEditing, setCostEditing] = useState<AdminUser | null>(null);
+  const costRateMutation = useMutation({
+    mutationFn: (args: { id: string; costRate: number | null }) =>
+      api.put(`/api/admin/users/${args.id}/cost-rate`, { costRate: args.costRate }),
+    onSuccess: () => {
+      setCostEditing(null);
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
+  });
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4 gap-3">
@@ -158,6 +169,7 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
                   <th className="text-left px-6 py-3 font-medium">Roles</th>
                   <th className="text-left px-6 py-3 font-medium">BU</th>
                   <th className="text-left px-6 py-3 font-medium">Accounts</th>
+                  <th className="text-right px-6 py-3 font-medium">Cost $/h</th>
                   <th className="text-right px-6 py-3 font-medium">Projects</th>
                   <th className="text-right px-6 py-3 font-medium">Status</th>
                   <th className="text-right px-6 py-3 font-medium"></th>
@@ -185,6 +197,19 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
                       {u.managedAccounts.length > 0
                         ? u.managedAccounts.map((a) => a.code).join(", ")
                         : "—"}
+                    </td>
+                    <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
+                      <button
+                        onClick={() => setCostEditing(u)}
+                        className="hover:text-indigo-600"
+                        title="Edit cost rate"
+                      >
+                        {u.costRate != null ? (
+                          `$${u.costRate}`
+                        ) : (
+                          <span className="text-gray-300">— set</span>
+                        )}
+                      </button>
                     </td>
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
                       {u.projectCount}
@@ -248,6 +273,34 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
         <InviteModal
           businessUnits={busQ.data.businessUnits}
           onClose={() => setInviting(false)}
+        />
+      )}
+
+      {costEditing && (
+        <PromptModal
+          open
+          title={`Cost rate — ${costEditing.name}`}
+          message="Fully-loaded hourly cost (salary + overhead). New projects use this rate; existing projects keep the rate captured when they were created. Leave blank to clear."
+          placeholder="e.g. 120"
+          initialValue={costEditing.costRate != null ? String(costEditing.costRate) : ""}
+          submitLabel="Save"
+          inputType="number"
+          inputMode="decimal"
+          validator={(v) => {
+            if (v.trim() === "") return null; // blank clears the rate
+            const n = Number(v);
+            if (!Number.isFinite(n) || n < 0) return "Enter a non-negative number";
+            return null;
+          }}
+          loading={costRateMutation.isPending}
+          onCancel={() => setCostEditing(null)}
+          onSubmit={(v) => {
+            const trimmed = v.trim();
+            costRateMutation.mutate({
+              id: costEditing.id,
+              costRate: trimmed === "" ? null : Number(trimmed),
+            });
+          }}
         />
       )}
     </div>

@@ -599,7 +599,7 @@ function Step2Resources({
       businessUnit: buCode,
       projectRole: u.projectRoles[0] ?? "",
       billRate: 175,
-      costRate: 90,
+      costRate: u.costRate ?? 0,
     };
     setState({ ...state, resources: [...state.resources, newResource] });
   };
