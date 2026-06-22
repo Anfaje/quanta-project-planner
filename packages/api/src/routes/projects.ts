@@ -5,6 +5,7 @@ import { logger } from "../lib/logger";
 import { requireAuth } from "../middleware/auth";
 import {
   canAccessProject,
+  canActivateProject,
   canApproveDraft,
   canAccessDraft,
   canCreateProject,
@@ -175,10 +176,7 @@ router.get("/drafts", async (req: Request, res: Response) => {
     resourceCount: p._count.assignments,
     updatedAt: p.updatedAt,
     isOwner: p.createdById === user.id,
-    canApprove: canApproveDraft(user, {
-      owningBuId: p.owningBu.id,
-      createdById: p.createdById,
-    }),
+    canApprove: canApproveDraft(user, { owningBuId: p.owningBu.id }),
   }));
 
   res.json({ drafts: rows });
@@ -334,10 +332,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       isDraft: project.status === "draft",
       canApproveDraft:
         project.status === "draft" &&
-        canApproveDraft(user, {
-          owningBuId: project.owningBuId,
-          createdById: project.createdById,
-        }),
+        canApproveDraft(user, { owningBuId: project.owningBuId }),
       canManageReviewers:
         project.status === "draft" &&
         (project.createdById === user.id || user.roles.includes(Role.AA)),
@@ -359,6 +354,15 @@ router.post("/", async (req: Request, res: Response) => {
 
   if (!canCreateProject(user, data.accountId, data.owningBuId)) {
     return res.status(403).json({ error: "Cannot create project in this account/BU" });
+  }
+
+  // A project can only reach `active` through an AA or the owning-BU BUL. They may
+  // launch directly; everyone else (PM, AC) must save a draft for approval.
+  if (!data.saveAsDraft && !canActivateProject(user, data.owningBuId)) {
+    return res.status(403).json({
+      error:
+        "Only an AA or the owning-BU BUL can launch a project directly. Save it as a draft for approval.",
+    });
   }
 
   // Verify references exist and are active.
@@ -577,7 +581,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
   if (project.status !== "draft") {
     return res.status(409).json({ error: "Only draft projects can be approved" });
   }
-  if (!canApproveDraft(user, { owningBuId: project.owningBuId, createdById: project.createdById })) {
+  if (!canApproveDraft(user, { owningBuId: project.owningBuId })) {
     return res.status(403).json({ error: "You do not have approval rights for this draft" });
   }
 
@@ -633,7 +637,7 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
   if (project.status !== "draft") {
     return res.status(409).json({ error: "Only draft projects can be rejected" });
   }
-  if (!canApproveDraft(user, { owningBuId: project.owningBuId, createdById: project.createdById })) {
+  if (!canApproveDraft(user, { owningBuId: project.owningBuId })) {
     return res.status(403).json({ error: "You do not have approval rights for this draft" });
   }
 

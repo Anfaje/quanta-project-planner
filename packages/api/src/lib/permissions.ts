@@ -197,21 +197,27 @@ export function canCreateProject(
 }
 
 /**
- * Who can approve a draft → active.
- *
- * Per product decision: either an AA (platform-wide) or the BUL of the draft's
- * OWNING business unit. Either single approval is sufficient. A user can never
- * approve their own draft — approval is a second pair of eyes by definition, so
- * the creator is excluded even if they hold AA/BUL.
+ * AA or the owning-BU BUL — the only roles that can move a project into `active`,
+ * whether by creating it directly or by approving a draft. A PM (or AC) cannot
+ * activate; their projects must be drafted and approved by an AA/BUL.
+ */
+export function canActivateProject(user: AuthUser, owningBuId: string): boolean {
+  if (user.roles.includes(Role.AA)) return true;
+  if (user.roles.includes(Role.BUL) && owningBuId === user.primaryBuId) return true;
+  return false;
+}
+
+/**
+ * Who can approve a draft → active. Identical mandate to activation: an AA or the
+ * owning-BU BUL. There is NO self-approval restriction — an AA/BUL may approve
+ * their own draft (product decision). Approval is reserved to AA/BUL, so a pure
+ * PM can never approve anything regardless of who created the draft.
  */
 export function canApproveDraft(
   user: AuthUser,
-  project: { owningBuId: string; createdById: string }
+  project: { owningBuId: string }
 ): boolean {
-  if (project.createdById === user.id) return false; // no self-approval
-  if (user.roles.includes(Role.AA)) return true;
-  if (user.roles.includes(Role.BUL) && project.owningBuId === user.primaryBuId) return true;
-  return false;
+  return canActivateProject(user, project.owningBuId);
 }
 
 /**

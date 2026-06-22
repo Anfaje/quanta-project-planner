@@ -161,6 +161,7 @@ describe("POST /api/projects", () => {
           { userId: pm.id, projectRole: "PM", billRate: 200, costRate: 100 },
         ],
         plannedHours: [],
+        saveAsDraft: true,
       },
     };
   }
@@ -184,14 +185,46 @@ describe("POST /api/projects", () => {
     expect(res.status).toBe(403);
   });
 
-  it("PM in the owning BU can create and the row lands", async () => {
+  it("PM in the owning BU can save a draft (status draft, code reserved)", async () => {
     const { pm, body } = await basePayload(prisma);
     const agent = await authenticateAs(app, pm.email);
     const res = await agent.post("/api/projects").send(body).expect(201);
 
     expect(res.body.projectId).toBeDefined();
+    expect(res.body.status).toBe("draft");
     const inDb = await prisma.project.findUnique({ where: { id: res.body.projectId } });
     expect(inDb?.projectCode).toBe(body.projectCode);
+    expect(inDb?.status).toBe("draft");
+  });
+
+  it("403 when a PM tries to launch directly (no saveAsDraft)", async () => {
+    const { pm, body } = await basePayload(prisma);
+    const agent = await authenticateAs(app, pm.email);
+    const res = await agent.post("/api/projects").send({ ...body, saveAsDraft: false });
+    expect(res.status).toBe(403);
+  });
+
+  it("BUL in the owning BU can launch directly (status active)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const agent = await authenticateAs(app, bul.email);
+    const res = await agent
+      .post("/api/projects")
+      .send({
+        name: "Direct Launch",
+        projectCode: `D-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+        accountId: account.id,
+        owningBuId: bu.id,
+        startDate: "2026-03-01",
+        endDate: "2026-03-29",
+        contingencyPct: 0.15,
+        assignments: [{ userId: bul.id, projectRole: "BUL", billRate: 200, costRate: 100 }],
+        plannedHours: [],
+        saveAsDraft: false,
+      })
+      .expect(201);
+    expect(res.body.status).toBe("active");
   });
 
   it("400 when endDate is before startDate", async () => {
@@ -223,6 +256,131 @@ describe("POST /api/projects", () => {
       });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/out of range/i);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// Draft approval workflow
+// ═══════════════════════════════════════════════════════════════
+
+describe("Draft approval workflow", () => {
+  async function seedDraft(
+    prisma: PrismaClient,
+    opts: { ownerId: string; owningBuId: string; accountId: string }
+  ) {
+    return seedProject(prisma, {
+      accountId: opts.accountId,
+      owningBuId: opts.owningBuId,
+      createdBy: opts.ownerId,
+      status: "draft",
+      assignments: [{ userId: opts.ownerId, projectRole: "PM" }],
+    });
+  }
+
+  it("excludes drafts from the main list but returns them from /drafts", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const pm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+
+    const draft = await seedDraft(prisma, { ownerId: pm.id, owningBuId: bu.id, accountId: account.id });
+    const active = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: pm.id,
+      status: "active",
+      assignments: [{ userId: pm.id, projectRole: "PM" }],
+    });
+
+    const agent = await authenticateAs(app, pm.email);
+
+    const list = await agent.get("/api/projects").expect(200);
+    const listIds = list.body.projects.map((p: { id: string }) => p.id);
+    expect(listIds).toContain(active.id);
+    expect(listIds).not.toContain(draft.id);
+
+    const drafts = await agent.get("/api/projects/drafts").expect(200);
+    const draftIds = drafts.body.drafts.map((d: { id: string }) => d.id);
+    expect(draftIds).toContain(draft.id);
+    expect(draftIds).not.toContain(active.id);
+  });
+
+  it("403 when a PM tries to approve a draft", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const owner = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const otherPm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const draft = await seedDraft(prisma, { ownerId: owner.id, owningBuId: bu.id, accountId: account.id });
+
+    const agent = await authenticateAs(app, otherPm.email);
+    await agent.post(`/api/projects/${draft.id}/approve`).expect(403);
+
+    const inDb = await prisma.project.findUnique({ where: { id: draft.id } });
+    expect(inDb?.status).toBe("draft");
+  });
+
+  it("owning-BU BUL approves a draft -> active", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const pm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const draft = await seedDraft(prisma, { ownerId: pm.id, owningBuId: bu.id, accountId: account.id });
+
+    const agent = await authenticateAs(app, bul.email);
+    const res = await agent.post(`/api/projects/${draft.id}/approve`).expect(200);
+    expect(res.body.status).toBe("active");
+
+    const inDb = await prisma.project.findUnique({ where: { id: draft.id } });
+    expect(inDb?.status).toBe("active");
+  });
+
+  it("a BUL can approve their OWN draft (no self-approval restriction)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const draft = await seedDraft(prisma, { ownerId: bul.id, owningBuId: bu.id, accountId: account.id });
+
+    const agent = await authenticateAs(app, bul.email);
+    await agent.post(`/api/projects/${draft.id}/approve`).expect(200);
+
+    const inDb = await prisma.project.findUnique({ where: { id: draft.id } });
+    expect(inDb?.status).toBe("active");
+  });
+
+  it("reject leaves the project a draft", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const pm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const draft = await seedDraft(prisma, { ownerId: pm.id, owningBuId: bu.id, accountId: account.id });
+
+    const agent = await authenticateAs(app, bul.email);
+    const res = await agent
+      .post(`/api/projects/${draft.id}/reject`)
+      .send({ reason: "Margins too thin" })
+      .expect(200);
+    expect(res.body.rejected).toBe(true);
+
+    const inDb = await prisma.project.findUnique({ where: { id: draft.id } });
+    expect(inDb?.status).toBe("draft");
+  });
+
+  it("owner shares a draft; the reviewer then sees it under /drafts", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const owner = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const peer = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const draft = await seedDraft(prisma, { ownerId: owner.id, owningBuId: bu.id, accountId: account.id });
+
+    const ownerAgent = await authenticateAs(app, owner.email);
+    await ownerAgent
+      .post(`/api/projects/${draft.id}/reviewers`)
+      .send({ userIds: [peer.id] })
+      .expect(200);
+
+    const peerAgent = await authenticateAs(app, peer.email);
+    const drafts = await peerAgent.get("/api/projects/drafts").expect(200);
+    const draftIds = drafts.body.drafts.map((d: { id: string }) => d.id);
+    expect(draftIds).toContain(draft.id);
   });
 });
 
