@@ -131,6 +131,14 @@ export function ProjectDetailPage() {
         <div className="text-xs text-gray-500">
           {formatDate(p.startDate)} – {formatDate(p.endDate)} · {p.totalWeeks} weeks
         </div>
+        {p.baseline && (
+          <div className="text-xs text-gray-500">
+            Initial plan · {formatDate(p.baseline.capturedAt)}
+          </div>
+        )}
+        {p.status === "complete" && (
+          <Badge tone="amber">Plan locked for evaluation</Badge>
+        )}
         {p.sharedWithBus.length > 0 && (
           <div className="text-xs text-gray-500">
             Shared with {p.sharedWithBus.map((b) => b.code).join(", ")}

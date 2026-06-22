@@ -14,6 +14,7 @@ import {
   canManagePlan,
   canManageProject,
   canViewFinancials,
+  isPlanLocked,
 } from "../lib/permissions";
 import {
   buildProjectAccessFilter,
@@ -23,6 +24,7 @@ import {
   serializeForUser,
   serializeAssignment,
 } from "../services/financialSerializer";
+import { captureBaseline } from "../services/planBaseline";
 import {
   computeAssignmentFinancials,
   computeProjectFinancials,
@@ -309,6 +311,11 @@ router.get("/:id", async (req: Request, res: Response) => {
     ctx.ctx
   );
 
+  const baseline = await prisma.planBaseline.findUnique({
+    where: { projectId: project.id },
+    select: { capturedAt: true },
+  });
+
   res.json({
     project: {
       id: project.id,
@@ -329,12 +336,13 @@ router.get("/:id", async (req: Request, res: Response) => {
       createdBy: project.createdBy,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
+      baseline: baseline ? { capturedAt: baseline.capturedAt } : null,
     },
     assignments: assignmentRows,
     financials,
     capabilities: {
       canManage: canManageProject(user),
-      canManagePlan: canManagePlan(user),
+      canManagePlan: canManagePlan(user) && !isPlanLocked(project.status),
       canLockWeeks: canLockWeeks(user),
       isDraft: project.status === "draft",
       canApproveDraft:
@@ -464,6 +472,12 @@ router.post("/", async (req: Request, res: Response) => {
         if (entries.length > 0) {
           await tx.hourEntry.createMany({ data: entries });
         }
+      }
+
+      // A project launched directly (not saved as a draft) is active from the
+      // start, so capture its Initial Plan baseline now, within the same tx.
+      if (!data.saveAsDraft) {
+        await captureBaseline(tx, project.id, user.id);
       }
 
       return project;
@@ -611,6 +625,10 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
     where: { id: project.id },
     data: { status: "active", rejectionNote: null, rejectionAt: null },
   });
+
+  // The draft is now active — capture its Initial Plan baseline (idempotent).
+  await captureBaseline(prisma, project.id, user.id);
+
   await logChanges("Project", project.id, user.id, [
     { field: "status", oldValue: "draft", newValue: "active" },
     {
@@ -721,6 +739,24 @@ router.patch("/:id", async (req: Request, res: Response) => {
 
   if (ctx.status === "archived") {
     return res.status(409).json({ error: "Archived projects are read-only" });
+  }
+
+  // A completed project's plan is locked for evaluation. Allow a status-only
+  // change (to reopen or archive), but block edits to the plan itself.
+  if (ctx.status === "complete") {
+    const onlyStatusChange =
+      parsed.data.status !== undefined &&
+      parsed.data.name === undefined &&
+      parsed.data.description === undefined &&
+      parsed.data.startDate === undefined &&
+      parsed.data.endDate === undefined &&
+      parsed.data.contingencyPct === undefined;
+    if (!onlyStatusChange) {
+      return res.status(409).json({
+        error:
+          "This project is complete; its plan is locked. Reopen it (set status to active) to make changes.",
+      });
+    }
   }
 
   // A draft's status is owned by the approval workflow. Block any status change
@@ -911,7 +947,7 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
-  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+  if (isPlanLocked(ctx.status)) return res.status(409).json({ error: ctx.status === "complete" ? "Project is complete; its plan is locked. Reopen it to make changes." : "Project is archived" });
 
   const data = parsed.data;
 
@@ -994,7 +1030,7 @@ router.patch("/:id/assignments/:assignmentId", async (req: Request, res: Respons
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
-  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+  if (isPlanLocked(ctx.status)) return res.status(409).json({ error: ctx.status === "complete" ? "Project is complete; its plan is locked. Reopen it to make changes." : "Project is archived" });
 
   const existing = await prisma.resourceAssignment.findUnique({
     where: { id: req.params.assignmentId },
@@ -1055,7 +1091,7 @@ router.delete("/:id/assignments/:assignmentId", async (req: Request, res: Respon
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
-  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+  if (isPlanLocked(ctx.status)) return res.status(409).json({ error: ctx.status === "complete" ? "Project is complete; its plan is locked. Reopen it to make changes." : "Project is archived" });
 
   const existing = await prisma.resourceAssignment.findUnique({
     where: { id: req.params.assignmentId },
@@ -1158,8 +1194,8 @@ router.get("/:id/hours", async (req: Request, res: Response) => {
     weeks,
     assignments: rows,
     capabilities: {
-      canEditOwnActuals: user.roles.includes(Role.IC),
-      canManagePlan: canManagePlan(user),
+      canEditOwnActuals: user.roles.includes(Role.IC) && !isPlanLocked(ctx.status),
+      canManagePlan: canManagePlan(user) && !isPlanLocked(ctx.status),
       canLockWeeks: canLockWeeks(user),
     },
   });
@@ -1189,7 +1225,7 @@ router.put("/:id/hours", async (req: Request, res: Response) => {
   if (!isDraftOwner && !canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
     return res.status(403).json({ error: "No access to this project" });
   }
-  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+  if (isPlanLocked(ctx.status)) return res.status(409).json({ error: ctx.status === "complete" ? "Project is complete; its plan is locked. Reopen it to make changes." : "Project is archived" });
 
   const assignmentIds = [...new Set(parsed.data.updates.map((u) => u.assignmentId))];
   const assignments = await prisma.resourceAssignment.findMany({
@@ -1356,7 +1392,7 @@ router.post("/:id/hours/import", async (req: Request, res: Response) => {
   if (!canManagePlan(user)) {
     return res.status(403).json({ error: "Importing hours requires a PM, AC, or BUL role" });
   }
-  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+  if (isPlanLocked(ctx.status)) return res.status(409).json({ error: ctx.status === "complete" ? "Project is complete; its plan is locked. Reopen it to make changes." : "Project is archived" });
 
   const rows = parseCsv(parsed.data.csv);
   if (rows.length < 2) {
@@ -1653,7 +1689,7 @@ router.post("/:id/weeks/:week/fill-remaining", async (req: Request, res: Respons
   if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
     return res.status(403).json({ error: "No access to this project" });
   }
-  if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
+  if (isPlanLocked(ctx.status)) return res.status(409).json({ error: ctx.status === "complete" ? "Project is complete; its plan is locked. Reopen it to make changes." : "Project is archived" });
 
   const isICOnly =
     user.roles.includes(Role.IC) &&

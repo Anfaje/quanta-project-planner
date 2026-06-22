@@ -70,6 +70,7 @@ function detail(opts: {
       createdBy: { id: "u-owner", name: "Owner Person", email: "owner@e.com" },
       createdAt: "2026-03-01",
       updatedAt: "2026-03-02",
+      baseline: null,
       ...(opts.project ?? {}),
     },
     assignments: opts.assignments ?? [],

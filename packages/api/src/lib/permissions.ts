@@ -139,6 +139,15 @@ export function canManagePlan(user: AuthUser): boolean {
 }
 
 /**
+ * A project's plan (assignments, hours, dates, contingency) is locked once the
+ * project is complete or archived. Completing a project freezes the Current
+ * plan for evaluation; reopening it (status -> active) unlocks it again.
+ */
+export function isPlanLocked(status: string): boolean {
+  return status === "complete" || status === "archived";
+}
+
+/**
  * Check if a user can lock/unlock weeks.
  */
 export function canLockWeeks(user: AuthUser): boolean {

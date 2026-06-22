@@ -59,6 +59,7 @@ export async function resetMutableTables(prisma: PrismaClient): Promise<void> {
     prisma.resourceAssignment.deleteMany(),
     prisma.projectShare.deleteMany(),
     prisma.projectReviewer.deleteMany(),
+    prisma.planBaseline.deleteMany(),
     prisma.project.deleteMany(),
     prisma.userInvite.deleteMany(),
     prisma.passwordReset.deleteMany(),

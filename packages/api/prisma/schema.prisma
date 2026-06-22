@@ -59,6 +59,7 @@ model User {
   domainsAdded     DomainWhitelist[] @relation("DomainAdder")
   invitesSent      UserInvite[]     @relation("InviteSender")
   passwordResets   PasswordReset[]
+  baselinesCaptured PlanBaseline[]  @relation("BaselineCapturer")
 
   @@index([primaryBuId])
   @@map("users")
@@ -153,6 +154,7 @@ model Project {
   assignments ResourceAssignment[]
   shares      ProjectShare[]
   reviewers   ProjectReviewer[]
+  baseline    PlanBaseline?
 
   @@index([accountId, owningBuId, status])
   @@map("projects")
@@ -293,4 +295,20 @@ model PasswordReset {
 
   @@index([userId])
   @@map("password_resets")
+}
+
+/// Frozen snapshot of a project's plan, captured when the project first goes
+/// active ("Initial Plan"). One per project, immutable. The live assignments +
+/// hour entries remain the editable "Current Plan"; actuals accrue against them.
+/// Stored as JSON because it is read as a whole for plan-vs-actuals comparison.
+model PlanBaseline {
+  id           String   @id @default(uuid())
+  projectId    String   @unique @map("project_id")
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  capturedAt   DateTime @default(now()) @map("captured_at")
+  capturedById String   @map("captured_by")
+  capturedBy   User     @relation("BaselineCapturer", fields: [capturedById], references: [id])
+  snapshot     Json
+
+  @@map("plan_baselines")
 }

@@ -176,6 +176,7 @@ export interface ProjectDetail {
     createdBy: UserLite;
     createdAt: string;
     updatedAt: string;
+    baseline: { capturedAt: string } | null;
   };
   assignments: AssignmentRow[];
   financials: ProjectFinancials;
