@@ -26,6 +26,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const state = (location.state as LocationState | null) ?? null;
+  const { refresh } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -48,7 +49,10 @@ export function LoginPage() {
           state: { mfaSetup: res.mfaSetup, from },
         });
       } else {
-        // status === "authenticated" — MFA disabled, go straight to the app.
+        // status === "authenticated" — MFA disabled. Refresh the /api/me cache
+        // before navigating so ProtectedRoute sees the authenticated user
+        // instead of the stale null and doesn't bounce straight back to /login.
+        await refresh();
         navigate(from ?? "/dashboard", { replace: true });
       }
     } catch (err) {

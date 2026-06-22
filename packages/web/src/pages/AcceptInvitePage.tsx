@@ -4,6 +4,7 @@ import { api, ApiError } from "../lib/api";
 import type { InviteContext, AcceptInviteResponse } from "../lib/types";
 import { AuthShell } from "../components/AuthShell";
 import { Button, FormInput, Alert, Spinner } from "../components/ui";
+import { useAuth } from "../context/AuthContext";
 
 /**
  * Invite Accept — public page reached via /invite/:token.
@@ -22,6 +23,7 @@ import { Button, FormInput, Alert, Spinner } from "../components/ui";
 export function AcceptInvitePage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const { refresh } = useAuth();
 
   const [context, setContext] = useState<InviteContext | null>(null);
   const [loadError, setLoadError] = useState<{ status: number; message: string } | null>(null);
@@ -83,7 +85,9 @@ export function AcceptInvitePage() {
         inviter: context?.invitedBy?.name,
       };
       if (res.status === "authenticated") {
-        // MFA disabled — account created and logged in already.
+        // MFA disabled — account created and logged in already. Refresh the
+        // /api/me cache before navigating so ProtectedRoute doesn't bounce us.
+        await refresh();
         navigate("/dashboard", { replace: true, state: { welcome } });
       } else {
         navigate("/login/mfa-setup", {

@@ -4,6 +4,7 @@ import { api, ApiError } from "../lib/api";
 import type { RegisterResponse, DomainsResponse } from "../lib/types";
 import { AuthShell } from "../components/AuthShell";
 import { Button, FormInput, Alert, Spinner } from "../components/ui";
+import { useAuth } from "../context/AuthContext";
 
 /**
  * Signup — domain-whitelisted. The allowed-domains list comes from
@@ -31,6 +32,7 @@ const PROJECT_ROLE_OPTIONS = [
 
 export function SignupPage() {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
 
   const [domains, setDomains] = useState<string[] | null>(null);
   const [domainsUnavailable, setDomainsUnavailable] = useState(false);
@@ -95,7 +97,10 @@ export function SignupPage() {
         projectRoles,
       });
       if (res.status === "authenticated") {
-        // MFA disabled — account created and logged in already.
+        // MFA disabled — account created and logged in already. Refresh the
+        // /api/me cache before navigating so ProtectedRoute doesn't bounce us
+        // back to /login on the stale (pre-signup) null.
+        await refresh();
         navigate("/dashboard", { replace: true, state: { welcome: { kind: "direct" } } });
       } else {
         navigate("/login/mfa-setup", {
