@@ -121,6 +121,8 @@ interface SeedProjectOpts {
   startDate?: Date;
   endDate?: Date;
   contingencyPct?: number;
+  pricingModel?: "time_and_materials" | "fixed_price";
+  fixedPrice?: number;
   totalWeeks?: number;
   assignments?: Array<{
     userId: string;
@@ -136,6 +138,7 @@ export async function seedProject(prisma: PrismaClient, opts: SeedProjectOpts) {
   const totalWeeks = opts.totalWeeks ?? 4;
   const startDate = opts.startDate ?? new Date("2026-03-01T00:00:00Z");
   const endDate = opts.endDate ?? new Date(startDate.getTime() + (totalWeeks - 1) * 7 * 86_400_000);
+  const isFixed = opts.pricingModel === "fixed_price";
 
   const project = await prisma.project.create({
     data: {
@@ -147,7 +150,9 @@ export async function seedProject(prisma: PrismaClient, opts: SeedProjectOpts) {
       status: opts.status ?? "active",
       startDate,
       endDate,
-      contingencyPct: opts.contingencyPct ?? 0.15,
+      contingencyPct: isFixed ? 0 : opts.contingencyPct ?? 0.15,
+      pricingModel: opts.pricingModel ?? "time_and_materials",
+      fixedPrice: isFixed ? opts.fixedPrice ?? 0 : null,
     },
   });
 
@@ -158,7 +163,7 @@ export async function seedProject(prisma: PrismaClient, opts: SeedProjectOpts) {
           projectId: project.id,
           userId: a.userId,
           projectRole: a.projectRole,
-          billRate: a.billRate ?? 175,
+          billRate: isFixed ? null : a.billRate ?? 175,
           costRate: a.costRate ?? 90,
           businessUnit: "TEST-BU",
         },

@@ -290,7 +290,8 @@ router.get("/:id", async (req: Request, res: Response) => {
       costRate: a.costRate,
       entries: a.hourEntries,
     })),
-    project.contingencyPct
+    project.contingencyPct,
+    { pricingModel: project.pricingModel, fixedPrice: project.fixedPrice }
   );
 
   const financials = serializeForUser(
@@ -306,6 +307,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       marginPct: projectFin.marginPct,
       actualMarginPct: projectFin.actualMarginPct,
       eacHours: projectFin.eacHours,
+      fixedPrice: projectFin.fixedPrice,
     },
     user,
     ctx.ctx
@@ -322,6 +324,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       name: project.name,
       projectCode: project.projectCode,
       status: project.status,
+      pricingModel: project.pricingModel,
       description: project.description,
       rejectionNote: project.rejectionNote,
       rejectionAt: project.rejectionAt,
@@ -366,6 +369,7 @@ router.post("/", async (req: Request, res: Response) => {
   }
   const data = parsed.data;
   const user = req.authUser!;
+  const isFixedPrice = data.pricingModel === "fixed_price";
 
   if (!canCreateProject(user, data.accountId, data.owningBuId)) {
     return res.status(403).json({ error: "Cannot create project in this account/BU" });
@@ -438,7 +442,9 @@ router.post("/", async (req: Request, res: Response) => {
           projectCode: data.projectCode,
           startDate,
           endDate,
-          contingencyPct: new Prisma.Decimal(data.contingencyPct),
+          contingencyPct: new Prisma.Decimal(isFixedPrice ? 0 : data.contingencyPct),
+          pricingModel: data.pricingModel,
+          fixedPrice: isFixedPrice ? new Prisma.Decimal(data.fixedPrice!) : null,
           description: data.description,
           createdById: user.id,
           status: data.saveAsDraft ? "draft" : "active",
@@ -451,7 +457,7 @@ router.post("/", async (req: Request, res: Response) => {
             projectId: project.id,
             userId: a.userId,
             projectRole: a.projectRole,
-            billRate: new Prisma.Decimal(a.billRate),
+            billRate: isFixedPrice ? null : new Prisma.Decimal(a.billRate!),
             costRate: new Prisma.Decimal(a.costRate),
             businessUnit: userBuMap.get(a.userId) ?? "",
           },
@@ -771,6 +777,17 @@ router.patch("/:id", async (req: Request, res: Response) => {
   const updateData: Prisma.ProjectUpdateInput = {};
   const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
 
+  // Pricing model is immutable (not in updateProjectSchema). Keep the editable
+  // fields consistent with it: a fixed price has no contingency; a T&M project
+  // has no contract value.
+  const isFixedPrice = ctx.pricingModel === "fixed_price";
+  if (isFixedPrice && data.contingencyPct !== undefined) {
+    return res.status(400).json({ error: "Fixed-price projects don't use contingency" });
+  }
+  if (!isFixedPrice && data.fixedPrice !== undefined) {
+    return res.status(400).json({ error: "fixedPrice only applies to fixed-price projects" });
+  }
+
   if (data.name !== undefined) {
     updateData.name = data.name;
     changes.push({ field: "name", oldValue: ctx.name, newValue: data.name });
@@ -801,6 +818,14 @@ router.patch("/:id", async (req: Request, res: Response) => {
       field: "contingency_pct",
       oldValue: String(Number(ctx.contingencyPct)),
       newValue: String(data.contingencyPct),
+    });
+  }
+  if (data.fixedPrice !== undefined) {
+    updateData.fixedPrice = new Prisma.Decimal(data.fixedPrice);
+    changes.push({
+      field: "fixed_price",
+      oldValue: ctx.fixedPrice != null ? String(Number(ctx.fixedPrice)) : null,
+      newValue: String(data.fixedPrice),
     });
   }
   if (data.status !== undefined) {
@@ -950,6 +975,12 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
   if (isPlanLocked(ctx.status)) return res.status(409).json({ error: ctx.status === "complete" ? "Project is complete; its plan is locked. Reopen it to make changes." : "Project is archived" });
 
   const data = parsed.data;
+  const isFixedPrice = ctx.pricingModel === "fixed_price";
+  if (!isFixedPrice && data.billRate == null) {
+    return res
+      .status(400)
+      .json({ error: "A bill rate is required for resources on a time & materials project" });
+  }
 
   const targetUser = await prisma.user.findUnique({
     where: { id: data.userId },
@@ -972,7 +1003,7 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
         projectId: ctx.id,
         userId: data.userId,
         projectRole: data.projectRole,
-        billRate: new Prisma.Decimal(data.billRate),
+        billRate: isFixedPrice ? null : new Prisma.Decimal(data.billRate!),
         costRate: new Prisma.Decimal(data.costRate),
         businessUnit: targetUser.primaryBu?.code ?? "",
       },

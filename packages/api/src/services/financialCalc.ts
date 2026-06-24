@@ -75,11 +75,13 @@ export interface ProjectFinancials {
   actualMarginPct: number;    // (actualFee - actualCost) / actualFee × 100
   eacHours: number;           // estimate-at-completion hours: sum(actual ?? planned)
   eacCost: number;            // eac hours at cost rate per assignment
+  fixedPrice: number | null;  // contract value on fixed-price projects, else null
 }
 
 export function computeProjectFinancials(
   assignments: AssignmentInput[],
-  contingencyPct: Decimalish
+  contingencyPct: Decimalish,
+  pricing?: { pricingModel: string; fixedPrice: Decimalish }
 ): ProjectFinancials {
   let totalPlannedHours = 0;
   let totalActualHours = 0;
@@ -114,6 +116,31 @@ export function computeProjectFinancials(
   }
 
   const contPct = toNum(contingencyPct);
+  const isFixedPrice = pricing?.pricingModel === "fixed_price";
+
+  if (isFixedPrice) {
+    // Revenue is the fixed contract value, independent of hours and bill rates.
+    // Cost stays hours × cost rate (computed above). Contingency does not apply.
+    const price = toNum(pricing?.fixedPrice);
+    const marginPct = price > 0 ? ((price - totalCost) / price) * 100 : 0;
+    const actualMarginPct = price > 0 ? ((price - totalActualCost) / price) * 100 : 0;
+    return {
+      totalPlannedHours: round2(totalPlannedHours),
+      totalActualHours: round2(totalActualHours),
+      totalFee: round2(price),
+      totalActualFee: round2(price),
+      totalCost: round2(totalCost),
+      totalActualCost: round2(totalActualCost),
+      contingencyAmt: 0,
+      adjustedFee: round2(price),
+      marginPct: round2(marginPct),
+      actualMarginPct: round2(actualMarginPct),
+      eacHours: round2(eacHours),
+      eacCost: round2(eacCost),
+      fixedPrice: round2(price),
+    };
+  }
+
   const contingencyAmt = totalFee * contPct;
   const adjustedFee = totalFee + contingencyAmt;
   const marginPct = totalFee > 0 ? ((totalFee - totalCost) / totalFee) * 100 : 0;
@@ -133,6 +160,7 @@ export function computeProjectFinancials(
     actualMarginPct: round2(actualMarginPct),
     eacHours: round2(eacHours),
     eacCost: round2(eacCost),
+    fixedPrice: null,
   };
 }
 

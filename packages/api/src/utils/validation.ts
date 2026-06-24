@@ -62,7 +62,7 @@ const dateStringSchema = z
 const wizardAssignmentSchema = z.object({
   userId: z.string().uuid(),
   projectRole: z.string().min(1).max(100),
-  billRate: z.number().min(0).max(10_000),
+  billRate: z.number().min(0).max(10_000).optional(), // required for T&M (enforced on the project), omitted for fixed-price
   costRate: z.number().min(0).max(10_000),
 });
 
@@ -85,6 +85,8 @@ export const createProjectSchema = z
     startDate: dateStringSchema,
     endDate: dateStringSchema,
     contingencyPct: z.number().min(0).max(1).default(0.15),
+    pricingModel: z.enum(["time_and_materials", "fixed_price"]).default("time_and_materials"),
+    fixedPrice: z.number().min(0).max(1_000_000_000).nullable().optional(),
     description: z.string().max(2000).optional(),
     assignments: z.array(wizardAssignmentSchema).min(1, "At least one resource is required"),
     plannedHours: z.array(wizardPlannedHourSchema).default([]),
@@ -100,13 +102,45 @@ export const createProjectSchema = z
       return new Set(ids).size === ids.length;
     },
     { message: "Duplicate userId in assignments", path: ["assignments"] }
-  );
+  )
+  .superRefine((d, ctx) => {
+    if (d.pricingModel === "fixed_price") {
+      // Fixed price: a positive contract value is required; per-hour bill rates
+      // are irrelevant and ignored.
+      if (d.fixedPrice == null || d.fixedPrice <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "A fixed-price project needs a contract value greater than 0",
+          path: ["fixedPrice"],
+        });
+      }
+    } else {
+      // Time & materials: every resource needs a bill rate; no contract value.
+      if (d.fixedPrice != null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "fixedPrice only applies to fixed-price projects",
+          path: ["fixedPrice"],
+        });
+      }
+      d.assignments.forEach((a, i) => {
+        if (a.billRate == null) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "A bill rate is required for each resource on a time & materials project",
+            path: ["assignments", i, "billRate"],
+          });
+        }
+      });
+    }
+  });
 
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   startDate: dateStringSchema.optional(),
   endDate: dateStringSchema.optional(),
   contingencyPct: z.number().min(0).max(1).optional(),
+  fixedPrice: z.number().min(0).max(1_000_000_000).optional(),
   description: z.string().max(2000).nullable().optional(),
   status: z.enum(["active", "on_hold", "complete", "archived"]).optional(),
 });
@@ -123,7 +157,7 @@ export const rejectDraftSchema = z.object({
 export const createAssignmentSchema = z.object({
   userId: z.string().uuid(),
   projectRole: z.string().min(1).max(100),
-  billRate: z.number().min(0).max(10_000),
+  billRate: z.number().min(0).max(10_000).optional(),
   costRate: z.number().min(0).max(10_000),
 });
 

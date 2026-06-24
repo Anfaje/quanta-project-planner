@@ -30,6 +30,8 @@ interface ProjectHeader {
   endDate: string;
   status: string;
   contingencyPct: number;
+  pricingModel: string;
+  fixedPrice: number | null;
 }
 
 export async function buildProjectPdf(
@@ -63,7 +65,8 @@ export async function buildProjectPdf(
 
   const fin = computeProjectFinancials(
     assignments.map((a) => ({ billRate: a.billRate, costRate: a.costRate, entries: a.entries })),
-    header.contingencyPct
+    header.contingencyPct,
+    { pricingModel: header.pricingModel, fixedPrice: header.fixedPrice }
   );
 
   return new Promise<Buffer>((resolve, reject) => {

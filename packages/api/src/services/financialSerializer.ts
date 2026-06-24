@@ -27,6 +27,7 @@ const FINANCIAL_FIELDS = [
   "costRate", "cost_rate",
   "totalCost", "total_cost",
   "totalFee", "total_fee",
+  "fixedPrice", "fixed_price",
   "margin", "marginPct", "margin_pct",
   "marginDollar", "margin_dollar",
   "contingencyAmt", "contingency_amt",

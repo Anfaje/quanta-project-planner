@@ -59,6 +59,8 @@ export interface ProjectContext {
   startDate: Date;
   endDate: Date;
   contingencyPct: Prisma.Decimal;
+  pricingModel: string;
+  fixedPrice: Prisma.Decimal | null;
   projectCode: string;
   name: string;
   ctx: ResourceContext;
@@ -88,6 +90,8 @@ export async function loadProjectContext(
       startDate: true,
       endDate: true,
       contingencyPct: true,
+      pricingModel: true,
+      fixedPrice: true,
       assignments: { select: { userId: true } },
       shares: { select: { sharedWithBuId: true } },
     },
@@ -108,6 +112,8 @@ export async function loadProjectContext(
     startDate: project.startDate,
     endDate: project.endDate,
     contingencyPct: project.contingencyPct,
+    pricingModel: project.pricingModel,
+    fixedPrice: project.fixedPrice,
     ctx: {
       projectId: project.id,
       projectAccountId: project.accountId,

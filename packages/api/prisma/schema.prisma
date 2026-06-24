@@ -22,6 +22,11 @@ enum ProjectStatus {
   draft
 }
 
+enum PricingModel {
+  time_and_materials
+  fixed_price
+}
+
 enum Role {
   IC
   PM
@@ -139,6 +144,8 @@ model Project {
   endDate        DateTime      @map("end_date") @db.Date
   contingencyPct Decimal       @default(0.15) @map("contingency_pct") @db.Decimal(5, 4)
   status         ProjectStatus @default(active)
+  pricingModel   PricingModel  @default(time_and_materials) @map("pricing_model")
+  fixedPrice     Decimal?      @map("fixed_price") @db.Decimal(12, 2)
   description    String?
   // Draft review feedback: set when an approver rejects a draft (the draft is
   // NOT deleted — it stays a draft so the owner can revise). Cleared on resubmit
@@ -203,7 +210,7 @@ model ResourceAssignment {
   userId       String  @map("user_id")
   user         User    @relation(fields: [userId], references: [id])
   projectRole  String  @map("project_role")         // e.g. "iOS Dev", "PM"
-  billRate     Decimal @map("bill_rate") @db.Decimal(10, 2)
+  billRate     Decimal? @map("bill_rate") @db.Decimal(10, 2) // null on fixed-price projects (no per-hour billing)
   costRate     Decimal @map("cost_rate") @db.Decimal(10, 2)
   businessUnit String  @map("business_unit")        // user's BU at assignment time
   createdAt    DateTime @default(now()) @map("created_at")

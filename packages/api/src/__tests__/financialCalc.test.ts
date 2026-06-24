@@ -152,6 +152,38 @@ describe("computeProjectFinancials", () => {
     expect(result.actualMarginPct).toBe(0);
     expect(result.eacHours).toBe(40); // falls back to planned
   });
+
+  it("fixed-price: revenue is the contract value, cost stays hours×rate, no contingency", () => {
+    const result = computeProjectFinancials(
+      [
+        {
+          billRate: null, // ignored on fixed-price
+          costRate: 100,
+          entries: [
+            { plannedHours: 40, actualHours: 30 },
+            { plannedHours: 40, actualHours: null },
+          ],
+        },
+        {
+          billRate: null,
+          costRate: 75,
+          entries: [{ plannedHours: 20, actualHours: 20 }],
+        },
+      ],
+      0.15, // contingency must be ignored for fixed-price
+      { pricingModel: "fixed_price", fixedPrice: 50_000 }
+    );
+
+    expect(result.fixedPrice).toBe(50_000);
+    expect(result.totalFee).toBe(50_000); // contract value, not rate×hours
+    expect(result.totalActualFee).toBe(50_000); // full contract value
+    expect(result.totalCost).toBe(9_500); // 80×100 + 20×75 (planned)
+    expect(result.totalActualCost).toBe(4_500); // 30×100 + 20×75 (actual)
+    expect(result.contingencyAmt).toBe(0);
+    expect(result.adjustedFee).toBe(50_000);
+    expect(result.marginPct).toBe(81); // (50000-9500)/50000
+    expect(result.actualMarginPct).toBe(91); // (50000-4500)/50000
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

@@ -145,12 +145,14 @@ router.get("/projects/:id/export.pdf", async (req: Request, res: Response) => {
       endDate: project.endDate.toISOString().slice(0, 10),
       status: project.status,
       contingencyPct: Number(project.contingencyPct),
+      pricingModel: project.pricingModel,
+      fixedPrice: project.fixedPrice != null ? Number(project.fixedPrice) : null,
     },
     project.assignments.map((a) => ({
       userName: a.user.name,
       projectRole: a.projectRole,
       businessUnit: a.businessUnit,
-      billRate: Number(a.billRate),
+      billRate: a.billRate != null ? Number(a.billRate) : 0,
       costRate: Number(a.costRate),
       entries: a.hourEntries.map((e) => ({
         plannedHours: e.plannedHours != null ? Number(e.plannedHours) : null,

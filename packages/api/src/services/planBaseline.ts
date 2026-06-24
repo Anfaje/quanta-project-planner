@@ -9,7 +9,7 @@ export interface BaselineAssignmentSnapshot {
   name: string; // frozen display name at baseline time
   projectRole: string;
   businessUnit: string;
-  billRate: number;
+  billRate: number | null; // null on fixed-price projects
   costRate: number;
   plannedHours: number; // total planned across all weeks at baseline
   weekly: Array<{ projectWeek: number; plannedHours: number }>;
@@ -19,6 +19,8 @@ export interface PlanBaselineSnapshot {
   startDate: string; // yyyy-mm-dd
   endDate: string;
   contingencyPct: number;
+  pricingModel: string;
+  fixedPrice: number | null;
   capturedAtStatus: string;
   assignments: BaselineAssignmentSnapshot[];
 }
@@ -49,6 +51,8 @@ export async function captureBaseline(
       endDate: true,
       contingencyPct: true,
       status: true,
+      pricingModel: true,
+      fixedPrice: true,
       assignments: {
         select: {
           userId: true,
@@ -75,7 +79,7 @@ export async function captureBaseline(
       name: a.user.name,
       projectRole: a.projectRole,
       businessUnit: a.businessUnit,
-      billRate: Number(a.billRate),
+      billRate: a.billRate != null ? Number(a.billRate) : null,
       costRate: Number(a.costRate),
       plannedHours,
       weekly,
@@ -86,6 +90,8 @@ export async function captureBaseline(
     startDate: isoDate(project.startDate),
     endDate: isoDate(project.endDate),
     contingencyPct: Number(project.contingencyPct),
+    pricingModel: project.pricingModel,
+    fixedPrice: project.fixedPrice != null ? Number(project.fixedPrice) : null,
     capturedAtStatus: project.status,
     assignments,
   };

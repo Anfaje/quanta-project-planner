@@ -145,7 +145,8 @@ async function buildProjectHealthSection(user: any) {
         costRate: a.costRate,
         entries: a.hourEntries,
       })),
-      p.contingencyPct
+      p.contingencyPct,
+      { pricingModel: p.pricingModel, fixedPrice: p.fixedPrice }
     );
     // EAC vs planned — a simple health signal anyone can see.
     const overrun = fin.totalPlannedHours > 0
@@ -210,7 +211,8 @@ async function buildAccountOverviewSection(user: any) {
             costRate: a.costRate,
             entries: a.hourEntries,
           })),
-          p.contingencyPct
+          p.contingencyPct,
+          { pricingModel: p.pricingModel, fixedPrice: p.fixedPrice }
         );
         return serializeForUser(
           {
@@ -361,7 +363,8 @@ async function buildBuHealthSection(user: any) {
         costRate: a.costRate,
         entries: a.hourEntries,
       })),
-      p.contingencyPct
+      p.contingencyPct,
+      { pricingModel: p.pricingModel, fixedPrice: p.fixedPrice }
     );
     ytdRevenue += fin.totalActualFee;
     ytdCost += fin.totalActualCost;
