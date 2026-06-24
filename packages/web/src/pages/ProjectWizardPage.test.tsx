@@ -302,4 +302,66 @@ describe("ProjectWizardPage", () => {
     const spinbuttons = screen.getAllByRole("spinbutton");
     expect(spinbuttons[1]).toHaveValue(120); // Maya's baseline, unchanged
   });
+
+  it("fixed-price: hides bill rate, requires a contract value, and sends pricingModel", async () => {
+    (api.post as any).mockResolvedValueOnce({
+      projectId: "p-fp",
+      projectCode: "FP-1",
+      status: "draft",
+    });
+    renderWithProviders(<ProjectWizardPage />);
+    await screen.findByText(/Project name/i);
+
+    // Step 1 — basics, then switch to Fixed price.
+    await userEvent.type(screen.getByLabelText(/project name/i), "Fixed Bid");
+    await userEvent.selectOptions(screen.getByLabelText(/account/i), "acc-1");
+    await userEvent.selectOptions(screen.getByLabelText(/owning business unit/i), "bu-1");
+    await userEvent.type(screen.getByLabelText(/start date/i), "2026-03-01");
+    await userEvent.type(screen.getByLabelText(/end date/i), "2026-03-08");
+    await userEvent.click(screen.getByRole("button", { name: /fixed price/i }));
+
+    // Continue is blocked until a contract value is entered.
+    const continueBtn = screen.getByRole("button", { name: /continue/i }) as HTMLButtonElement;
+    expect(continueBtn.disabled).toBe(true);
+    await userEvent.type(screen.getByLabelText(/contract value/i), "250000");
+    expect(continueBtn.disabled).toBe(false);
+    await userEvent.click(continueBtn);
+
+    // Step 2 — pick Maya. The bill-rate input is hidden, so only the cost
+    // spinbutton is present in her row.
+    await screen.findByText(/Team directory/i);
+    await userEvent.click(screen.getByText("Maya Chen"));
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(1); // cost only, no bill
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    // Step 3 — hours
+    await screen.findByRole("heading", { name: /^Planned hours$/i });
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    // Step 4 — preview shows the contract value rather than a quoted fee.
+    await screen.findByText(/Financial preview/i);
+    expect(screen.getByText(/Contract value/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Quoted fee/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    // Step 5 — review + save as draft.
+    await screen.findByRole("heading", { name: /^Review$/i });
+    await userEvent.click(screen.getByRole("button", { name: /save as draft/i }));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/projects",
+        expect.objectContaining({
+          name: "Fixed Bid",
+          pricingModel: "fixed_price",
+          fixedPrice: 250000,
+          assignments: [expect.objectContaining({ userId: "u1", costRate: 120 })],
+          saveAsDraft: true,
+        })
+      );
+    });
+    // The assignment carries no bill rate on a fixed-price project.
+    const sent = (api.post as any).mock.calls[0][1];
+    expect(sent.assignments[0].billRate).toBeUndefined();
+  });
 });

@@ -69,7 +69,12 @@ export function FinancialsPanel({ detail }: { detail: ProjectDetail }) {
                 </div>
               )}
               {burnQ.error && <Alert tone="rose">Couldn&apos;t load burn data.</Alert>}
-              {burnQ.data && <FeeCostChart burn={burnQ.data} />}
+              {burnQ.data && (
+                <FeeCostChart
+                  burn={burnQ.data}
+                  isFixedPrice={detail.project.pricingModel === "fixed_price"}
+                />
+              )}
             </CardBody>
           </Card>
         </div>
@@ -97,6 +102,7 @@ export function FinancialsPanel({ detail }: { detail: ProjectDetail }) {
 
 function MetricsHeader({ detail }: { detail: ProjectDetail }) {
   const f = detail.financials;
+  const isFixedPrice = detail.project.pricingModel === "fixed_price";
   const fee = f.totalFee ?? 0;
   const actualFee = f.totalActualFee ?? 0;
   const cost = f.totalCost ?? 0;
@@ -111,16 +117,30 @@ function MetricsHeader({ detail }: { detail: ProjectDetail }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
       <MetricCard
-        label="Quoted fee"
+        label={isFixedPrice ? "Contract value" : "Quoted fee"}
         value={formatMoney(fee)}
-        hint={f.adjustedFee !== undefined ? `+ ${formatMoney(f.adjustedFee - fee)} contingency` : undefined}
+        hint={
+          isFixedPrice
+            ? "fixed price"
+            : f.adjustedFee !== undefined
+            ? `+ ${formatMoney(f.adjustedFee - fee)} contingency`
+            : undefined
+        }
       />
-      <MetricCard
-        label="Fee burned"
-        value={formatMoney(actualFee)}
-        hint={`${feeProgress.toFixed(0)}% of quote`}
-        bar={{ pct: Math.min(100, feeProgress), tone: feeProgress > 100 ? "rose" : "indigo" }}
-      />
+      {isFixedPrice ? (
+        <MetricCard
+          label="Projected cost"
+          value={formatMoney(cost)}
+          hint={`${fee > 0 ? ((cost / fee) * 100).toFixed(0) : 0}% of contract`}
+        />
+      ) : (
+        <MetricCard
+          label="Fee burned"
+          value={formatMoney(actualFee)}
+          hint={`${feeProgress.toFixed(0)}% of quote`}
+          bar={{ pct: Math.min(100, feeProgress), tone: feeProgress > 100 ? "rose" : "indigo" }}
+        />
+      )}
       <MetricCard
         label="Cost burned"
         value={formatMoney(actualCost)}
@@ -153,7 +173,7 @@ function MetricsHeader({ detail }: { detail: ProjectDetail }) {
 // Fee/cost cumulative line chart
 // ═══════════════════════════════════════════════════════════════
 
-function FeeCostChart({ burn }: { burn: BurnSeries }) {
+function FeeCostChart({ burn, isFixedPrice }: { burn: BurnSeries; isFixedPrice: boolean }) {
   if (!burn.includesFinancials || burn.series.length === 0) {
     return (
       <EmptyState
@@ -192,23 +212,27 @@ function FeeCostChart({ burn }: { burn: BurnSeries }) {
             formatter={(value: number) => formatMoney(value)}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Line
-            type="monotone"
-            dataKey="plannedFee"
-            name="Planned fee"
-            stroke="#94a3b8"
-            strokeDasharray="4 4"
-            strokeWidth={2}
-            dot={false}
-          />
-          <Line
-            type="monotone"
-            dataKey="actualFee"
-            name="Actual fee"
-            stroke="#4f46e5"
-            strokeWidth={2.5}
-            dot={false}
-          />
+          {!isFixedPrice && (
+            <Line
+              type="monotone"
+              dataKey="plannedFee"
+              name="Planned fee"
+              stroke="#94a3b8"
+              strokeDasharray="4 4"
+              strokeWidth={2}
+              dot={false}
+            />
+          )}
+          {!isFixedPrice && (
+            <Line
+              type="monotone"
+              dataKey="actualFee"
+              name="Actual fee"
+              stroke="#4f46e5"
+              strokeWidth={2.5}
+              dot={false}
+            />
+          )}
           <Line
             type="monotone"
             dataKey="plannedCost"
@@ -315,20 +339,23 @@ function ResourceBreakdown({ detail }: { detail: ProjectDetail }) {
 // ═══════════════════════════════════════════════════════════════
 
 function ResourceFinancialsTable({ detail }: { detail: ProjectDetail }) {
+  const isFixedPrice = detail.project.pricingModel === "fixed_price";
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
           <tr>
             <th className="text-left px-6 py-3 font-medium">Resource</th>
-            <th className="text-right px-6 py-3 font-medium">Bill / Cost</th>
+            <th className="text-right px-6 py-3 font-medium">
+              {isFixedPrice ? "Cost rate" : "Bill / Cost"}
+            </th>
             <th className="text-right px-6 py-3 font-medium">Planned hrs</th>
             <th className="text-right px-6 py-3 font-medium">Actual hrs</th>
-            <th className="text-right px-6 py-3 font-medium">Planned fee</th>
-            <th className="text-right px-6 py-3 font-medium">Actual fee</th>
+            {!isFixedPrice && <th className="text-right px-6 py-3 font-medium">Planned fee</th>}
+            {!isFixedPrice && <th className="text-right px-6 py-3 font-medium">Actual fee</th>}
             <th className="text-right px-6 py-3 font-medium">Planned cost</th>
             <th className="text-right px-6 py-3 font-medium">Actual cost</th>
-            <th className="text-right px-6 py-3 font-medium">Margin</th>
+            {!isFixedPrice && <th className="text-right px-6 py-3 font-medium">Margin</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -345,7 +372,11 @@ function ResourceFinancialsTable({ detail }: { detail: ProjectDetail }) {
                   <div className="text-[10px] text-gray-400">{a.projectRole}</div>
                 </td>
                 <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                  {a.billRate != null && a.costRate != null
+                  {isFixedPrice
+                    ? a.costRate != null
+                      ? `$${a.costRate}/h`
+                      : "—"
+                    : a.billRate != null && a.costRate != null
                     ? `$${a.billRate} / $${a.costRate}`
                     : "—"}
                 </td>
@@ -355,27 +386,33 @@ function ResourceFinancialsTable({ detail }: { detail: ProjectDetail }) {
                 <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
                   {formatHours(a.actualHours)}h
                 </td>
-                <td className="px-6 py-3 text-right text-gray-600 tabular-nums">
-                  {formatMoney(planFee)}
-                </td>
-                <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                  {formatMoney(actFee)}
-                </td>
+                {!isFixedPrice && (
+                  <td className="px-6 py-3 text-right text-gray-600 tabular-nums">
+                    {formatMoney(planFee)}
+                  </td>
+                )}
+                {!isFixedPrice && (
+                  <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
+                    {formatMoney(actFee)}
+                  </td>
+                )}
                 <td className="px-6 py-3 text-right text-gray-600 tabular-nums">
                   {formatMoney(planCost)}
                 </td>
                 <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
                   {formatMoney(actCost)}
                 </td>
-                <td className="px-6 py-3 text-right">
-                  {actualMargin != null ? (
-                    <Badge tone={actualMargin >= 35 ? "emerald" : actualMargin >= 25 ? "amber" : "rose"}>
-                      {formatPercent(actualMargin)}
-                    </Badge>
-                  ) : (
-                    <span className="text-xs text-gray-300">—</span>
-                  )}
-                </td>
+                {!isFixedPrice && (
+                  <td className="px-6 py-3 text-right">
+                    {actualMargin != null ? (
+                      <Badge tone={actualMargin >= 35 ? "emerald" : actualMargin >= 25 ? "amber" : "rose"}>
+                        {formatPercent(actualMargin)}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-gray-300">—</span>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}

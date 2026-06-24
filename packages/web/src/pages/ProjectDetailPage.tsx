@@ -136,6 +136,7 @@ export function ProjectDetailPage() {
             Initial plan · {formatDate(p.baseline.capturedAt)}
           </div>
         )}
+        {p.pricingModel === "fixed_price" && <Badge tone="sky">Fixed price</Badge>}
         {p.status === "complete" && (
           <Badge tone="amber">Plan locked for evaluation</Badge>
         )}
@@ -384,6 +385,7 @@ function SummaryMetrics({ data }: { data: ProjectDetail }) {
 
 function OverviewTab({ data }: { data: ProjectDetail }) {
   const { assignments, project } = data;
+  const isFixedPrice = project.pricingModel === "fixed_price";
 
   return (
     <div className="space-y-6">
@@ -416,7 +418,7 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                 <th className="text-left px-6 py-3 font-medium">Name</th>
                 <th className="text-left px-6 py-3 font-medium">Role</th>
                 <th className="text-left px-6 py-3 font-medium">BU</th>
-                {assignments.some((a) => a.billRate !== undefined) && (
+                {!isFixedPrice && assignments.some((a) => a.billRate !== undefined) && (
                   <th className="text-right px-6 py-3 font-medium">Bill $/h</th>
                 )}
                 {assignments.some((a) => a.costRate !== undefined) && (
@@ -424,7 +426,7 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                 )}
                 <th className="text-right px-6 py-3 font-medium">Planned</th>
                 <th className="text-right px-6 py-3 font-medium">Actual</th>
-                {assignments.some((a) => a.plannedFee !== undefined) && (
+                {!isFixedPrice && assignments.some((a) => a.plannedFee !== undefined) && (
                   <th className="text-right px-6 py-3 font-medium">Fee</th>
                 )}
               </tr>
@@ -445,7 +447,7 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                       </Badge>
                     )}
                   </td>
-                  {assignments.some((x) => x.billRate !== undefined) && (
+                  {!isFixedPrice && assignments.some((x) => x.billRate !== undefined) && (
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
                       {a.billRate != null ? `$${a.billRate}` : "—"}
                     </td>
@@ -461,7 +463,7 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                   <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
                     {formatHours(a.actualHours)}h
                   </td>
-                  {assignments.some((x) => x.plannedFee !== undefined) && (
+                  {!isFixedPrice && assignments.some((x) => x.plannedFee !== undefined) && (
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
                       {a.plannedFee != null ? formatMoney(a.plannedFee) : "—"}
                     </td>

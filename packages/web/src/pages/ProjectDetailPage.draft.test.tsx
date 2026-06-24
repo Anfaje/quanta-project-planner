@@ -56,6 +56,7 @@ function detail(opts: {
       name: "Spring Campaign",
       projectCode: "DRF-1",
       status: "draft",
+      pricingModel: "time_and_materials",
       description: null,
       rejectionNote: null,
       rejectionAt: null,

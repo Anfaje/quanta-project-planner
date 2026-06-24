@@ -6,6 +6,7 @@ import type {
   AdminAccount,
   AdminBusinessUnit,
   AdminUser,
+  PricingModel,
 } from "../lib/types";
 import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
@@ -66,6 +67,8 @@ interface WizardState {
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   contingencyPct: number; // 0..1 (e.g., 0.15)
+  pricingModel: PricingModel;
+  fixedPrice: number; // contract value, used only when pricingModel is fixed_price
   description: string;
   resources: ResourceDraft[];
   /** Keyed by `${userId}|${projectWeek}` — trivial to serialize on submit. */
@@ -127,6 +130,8 @@ export function ProjectWizardPage() {
     startDate: "",
     endDate: "",
     contingencyPct: 0.15,
+    pricingModel: "time_and_materials",
+    fixedPrice: 0,
     description: "",
     resources: [],
     plannedHours: new Map(),
@@ -146,6 +151,7 @@ export function ProjectWizardPage() {
 
   const createMutation = useMutation({
     mutationFn: async (saveAsDraft: boolean) => {
+      const isFixedPrice = state.pricingModel === "fixed_price";
       const payload = {
         name: state.name,
         accountId: state.accountId,
@@ -154,11 +160,13 @@ export function ProjectWizardPage() {
         startDate: state.startDate,
         endDate: state.endDate,
         contingencyPct: state.contingencyPct,
+        pricingModel: state.pricingModel,
+        ...(isFixedPrice ? { fixedPrice: state.fixedPrice } : {}),
         description: state.description || undefined,
         assignments: state.resources.map((r) => ({
           userId: r.userId,
           projectRole: r.projectRole,
-          billRate: r.billRate,
+          billRate: isFixedPrice ? undefined : r.billRate,
           costRate: r.costRate,
         })),
         plannedHours: Array.from(state.plannedHours.entries())
@@ -196,7 +204,8 @@ export function ProjectWizardPage() {
           /^[A-Z0-9-]+$/.test(state.projectCode) &&
           state.accountId !== "" &&
           state.owningBuId !== "" &&
-          totalWeeks > 0
+          totalWeeks > 0 &&
+          (state.pricingModel !== "fixed_price" || state.fixedPrice > 0)
         );
       case 2:
         return (
@@ -204,7 +213,7 @@ export function ProjectWizardPage() {
           state.resources.every(
             (r) =>
               r.projectRole.trim().length > 0 &&
-              r.billRate >= 0 &&
+              (state.pricingModel === "fixed_price" || r.billRate >= 0) &&
               r.costRate >= 0
           )
         );
@@ -538,26 +547,60 @@ function Step1Basics({
             }
           />
 
-          <Field label="Contingency">
-            <div className="flex items-center gap-3">
-              <input
-                type="range"
-                min={0}
-                max={0.5}
-                step={0.05}
-                value={state.contingencyPct}
-                onChange={(e) => setState({ ...state, contingencyPct: Number(e.target.value) })}
-                className="flex-1"
-              />
-              <span className="w-14 text-right text-sm text-gray-700 tabular-nums font-medium">
-                {formatPercent(state.contingencyPct * 100, 0)}
-              </span>
+          <Field label="Pricing model">
+            <div className="flex gap-2">
+              {(["time_and_materials", "fixed_price"] as const).map((pm) => (
+                <button
+                  key={pm}
+                  type="button"
+                  onClick={() => setState({ ...state, pricingModel: pm })}
+                  className={`flex-1 px-3 py-2 text-sm rounded-lg border transition-colors ${
+                    state.pricingModel === pm
+                      ? "border-indigo-500 bg-indigo-50 text-indigo-700 font-medium"
+                      : "border-gray-200 text-gray-600 hover:border-gray-300"
+                  }`}
+                >
+                  {pm === "fixed_price" ? "Fixed price" : "Time & materials"}
+                </button>
+              ))}
             </div>
             <div className="text-xs text-gray-400 mt-1">
-              Applied to fee at completion; typical range 10–20%.
+              {state.pricingModel === "fixed_price"
+                ? "A single contract value; resources have no bill rate."
+                : "Revenue is billed per hour at each resource's rate."}
             </div>
           </Field>
-          <div /> {/* spacer */}
+
+          {state.pricingModel === "fixed_price" ? (
+            <FormInput
+              label="Contract value *"
+              type="number"
+              value={state.fixedPrice ? String(state.fixedPrice) : ""}
+              onChange={(v) => setState({ ...state, fixedPrice: Number(v) || 0 })}
+              hint="Total fixed price for the engagement"
+              error={state.fixedPrice <= 0 ? "Enter a contract value greater than 0" : undefined}
+            />
+          ) : (
+            <Field label="Contingency">
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0}
+                  max={0.5}
+                  step={0.05}
+                  value={state.contingencyPct}
+                  onChange={(e) => setState({ ...state, contingencyPct: Number(e.target.value) })}
+                  className="flex-1"
+                />
+                <span className="w-14 text-right text-sm text-gray-700 tabular-nums font-medium">
+                  {formatPercent(state.contingencyPct * 100, 0)}
+                </span>
+              </div>
+              <div className="text-xs text-gray-400 mt-1">
+                Applied to fee at completion; typical range 10–20%.
+              </div>
+            </Field>
+          )}
         </div>
 
         <FormTextarea
@@ -730,7 +773,11 @@ function Step2Resources({
                     Remove
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div
+                  className={`grid gap-2 ${
+                    state.pricingModel === "fixed_price" ? "grid-cols-2" : "grid-cols-3"
+                  }`}
+                >
                   <div>
                     <label className="text-[10px] font-semibold uppercase text-gray-400 block mb-1">
                       Role
@@ -743,21 +790,23 @@ function Step2Resources({
                       className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100"
                     />
                   </div>
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase text-gray-400 block mb-1">
-                      Bill $/h
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={5}
-                      value={r.billRate}
-                      onChange={(e) =>
-                        updateResource(r.userId, { billRate: Number(e.target.value) })
-                      }
-                      className="w-full px-2 py-1.5 text-xs text-right tabular-nums border border-gray-200 rounded focus:outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100"
-                    />
-                  </div>
+                  {state.pricingModel !== "fixed_price" && (
+                    <div>
+                      <label className="text-[10px] font-semibold uppercase text-gray-400 block mb-1">
+                        Bill $/h
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={5}
+                        value={r.billRate}
+                        onChange={(e) =>
+                          updateResource(r.userId, { billRate: Number(e.target.value) })
+                        }
+                        className="w-full px-2 py-1.5 text-xs text-right tabular-nums border border-gray-200 rounded focus:outline-none focus:border-indigo-300 focus:ring-1 focus:ring-indigo-100"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="text-[10px] font-semibold uppercase text-gray-400 block mb-1">
                       Cost $/h
@@ -965,31 +1014,43 @@ function Step4Financials({
   // the wizard's resource roster, contingency, and plannedHours map — so
   // navigating between steps or re-rendering for unrelated reasons no
   // longer re-runs this loop.
-  const { perResource, totalHours, totalFee, totalCost, contingencyAmt, margin } = useMemo(() => {
-    const pr = state.resources.map((r) => {
-      let hours = 0;
-      for (let w = 0; w < totalWeeks; w++) {
-        hours += state.plannedHours.get(`${r.userId}|${w}`) ?? 0;
-      }
+  const isFixedPrice = state.pricingModel === "fixed_price";
+  const { perResource, totalHours, totalFee, totalCost, contingencyAmt, revenue, margin } =
+    useMemo(() => {
+      const pr = state.resources.map((r) => {
+        let hours = 0;
+        for (let w = 0; w < totalWeeks; w++) {
+          hours += state.plannedHours.get(`${r.userId}|${w}`) ?? 0;
+        }
+        return {
+          ...r,
+          plannedHours: hours,
+          plannedFee: hours * r.billRate,
+          plannedCost: hours * r.costRate,
+        };
+      });
+      const th = pr.reduce((s, r) => s + r.plannedHours, 0);
+      const tf = pr.reduce((s, r) => s + r.plannedFee, 0);
+      const tc = pr.reduce((s, r) => s + r.plannedCost, 0);
+      const rev = isFixedPrice ? state.fixedPrice : tf;
       return {
-        ...r,
-        plannedHours: hours,
-        plannedFee: hours * r.billRate,
-        plannedCost: hours * r.costRate,
+        perResource: pr,
+        totalHours: th,
+        totalFee: tf,
+        totalCost: tc,
+        contingencyAmt: isFixedPrice ? 0 : tf * state.contingencyPct,
+        revenue: rev,
+        margin: rev > 0 ? ((rev - tc) / rev) * 100 : 0,
       };
-    });
-    const th = pr.reduce((s, r) => s + r.plannedHours, 0);
-    const tf = pr.reduce((s, r) => s + r.plannedFee, 0);
-    const tc = pr.reduce((s, r) => s + r.plannedCost, 0);
-    return {
-      perResource: pr,
-      totalHours: th,
-      totalFee: tf,
-      totalCost: tc,
-      contingencyAmt: tf * state.contingencyPct,
-      margin: tf > 0 ? ((tf - tc) / tf) * 100 : 0,
-    };
-  }, [state.resources, state.plannedHours, state.contingencyPct, totalWeeks]);
+    }, [
+      state.resources,
+      state.plannedHours,
+      state.contingencyPct,
+      state.pricingModel,
+      state.fixedPrice,
+      isFixedPrice,
+      totalWeeks,
+    ]);
 
   return (
     <Card>
@@ -1007,9 +1068,9 @@ function Step4Financials({
             hint={`${state.resources.length} resource${state.resources.length === 1 ? "" : "s"}`}
           />
           <MetricBig
-            label="Quoted fee"
-            value={formatMoney(totalFee)}
-            hint={`+ ${formatMoney(contingencyAmt)} contingency`}
+            label={isFixedPrice ? "Contract value" : "Quoted fee"}
+            value={formatMoney(isFixedPrice ? revenue : totalFee)}
+            hint={isFixedPrice ? "fixed price" : `+ ${formatMoney(contingencyAmt)} contingency`}
           />
           <MetricBig label="Cost" value={formatMoney(totalCost)} />
           <MetricBig
@@ -1034,7 +1095,7 @@ function Step4Financials({
                 <th className="text-left px-4 py-2 font-medium">Role</th>
                 <th className="text-right px-4 py-2 font-medium">Rate</th>
                 <th className="text-right px-4 py-2 font-medium">Hours</th>
-                <th className="text-right px-4 py-2 font-medium">Fee</th>
+                {!isFixedPrice && <th className="text-right px-4 py-2 font-medium">Fee</th>}
                 <th className="text-right px-4 py-2 font-medium">Cost</th>
               </tr>
             </thead>
@@ -1044,14 +1105,16 @@ function Step4Financials({
                   <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
                   <td className="px-4 py-2 text-gray-600">{r.projectRole}</td>
                   <td className="px-4 py-2 text-right text-gray-600 tabular-nums">
-                    ${r.billRate} / ${r.costRate}
+                    {isFixedPrice ? `$${r.costRate}/h` : `$${r.billRate} / $${r.costRate}`}
                   </td>
                   <td className="px-4 py-2 text-right text-gray-700 tabular-nums">
                     {formatHours(r.plannedHours)}h
                   </td>
-                  <td className="px-4 py-2 text-right text-gray-700 tabular-nums">
-                    {formatMoney(r.plannedFee)}
-                  </td>
+                  {!isFixedPrice && (
+                    <td className="px-4 py-2 text-right text-gray-700 tabular-nums">
+                      {formatMoney(r.plannedFee)}
+                    </td>
+                  )}
                   <td className="px-4 py-2 text-right text-gray-500 tabular-nums">
                     {formatMoney(r.plannedCost)}
                   </td>
@@ -1131,7 +1194,11 @@ function Step5Review({
                   : "—"
               }
             />
-            <ReviewField label="Contingency" value={formatPercent(state.contingencyPct * 100, 0)} />
+            {state.pricingModel === "fixed_price" ? (
+              <ReviewField label="Pricing" value={`Fixed price · ${formatMoney(state.fixedPrice)}`} />
+            ) : (
+              <ReviewField label="Contingency" value={formatPercent(state.contingencyPct * 100, 0)} />
+            )}
           </div>
           {state.description && (
             <div className="mt-4">
@@ -1160,7 +1227,9 @@ function Step5Review({
                 <div>
                   <div className="text-sm font-medium text-gray-800">{r.name}</div>
                   <div className="text-[10px] text-gray-400">
-                    {r.projectRole} · Bill ${r.billRate}/h · Cost ${r.costRate}/h
+                    {`${r.projectRole}${
+                      state.pricingModel !== "fixed_price" ? ` · Bill $${r.billRate}/h` : ""
+                    } · Cost $${r.costRate}/h`}
                   </div>
                 </div>
                 <div className="text-sm text-gray-600 tabular-nums">{formatHours(hours)}h</div>

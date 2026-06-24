@@ -10,6 +10,7 @@
 export type Role = "IC" | "PM" | "AC" | "BUL" | "AA";
 
 export type ProjectStatus = "active" | "on_hold" | "complete" | "archived" | "draft";
+export type PricingModel = "time_and_materials" | "fixed_price";
 
 export type DashboardSection =
   | "my_hours"
@@ -154,6 +155,7 @@ export interface ProjectFinancials {
   marginPct?: number;
   actualMarginPct?: number;
   eacHours: number;
+  fixedPrice?: number | null;
 }
 
 export interface ProjectDetail {
@@ -162,6 +164,7 @@ export interface ProjectDetail {
     name: string;
     projectCode: string;
     status: ProjectStatus;
+    pricingModel: PricingModel;
     description: string | null;
     rejectionNote: string | null;
     rejectionAt: string | null;
