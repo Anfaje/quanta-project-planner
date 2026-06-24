@@ -1,0 +1,47 @@
+# ─────────────────────────────────────────────────────────────
+# Quanta Web — STAGING Fly app configuration
+#
+# Mirror of fly.toml, pointed at the STAGING API over Fly's private
+# network. Deployed automatically on every push to main by
+# .github/workflows/web.yml:
+#   flyctl deploy --remote-only --config fly.staging.toml
+#
+# One-time provisioning (run locally — needs Fly access):
+#   fly apps create quanta-web-staging
+#   # No DB/Redis — nginx + static dist, reverse-proxying /api/* to
+#   # the staging API via the internal hostname below.
+# ─────────────────────────────────────────────────────────────
+
+app            = "quanta-web-staging"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Point at the STAGING API, not prod.
+  API_INTERNAL_URL = "http://quanta-api-staging.internal:4000"
+
+[http_service]
+  internal_port       = 8080
+  force_https         = true
+  auto_stop_machines   = true
+  auto_start_machines  = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 100
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval     = "15s"
+    method       = "GET"
+    timeout      = "5s"
+    path         = "/"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "256mb"
