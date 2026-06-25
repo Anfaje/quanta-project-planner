@@ -47,10 +47,14 @@ fly apps create quanta-web-staging
 1. Merge the `staging-setup` branch to `main`.
 2. The API and web workflows run CI, then auto-deploy to the **staging** apps.
    The API release command runs `prisma db push` against the staging DB.
-3. Seed alpha data into staging:
+3. Seed the single alpha user into staging (creates only `afh@trifork.com`
+   plus one BU + one account; **not** the full demo data):
    ```bash
-   fly ssh console --app quanta-api-staging -C "npm run db:seed"
+   fly ssh console --app quanta-api-staging -C "npm run db:seed:staging"
    ```
+   Initial login is `afh@trifork.com` / `Trifork-staging-changeme` (override by
+   running an interactive `fly ssh console` and setting `SEED_ADMIN_PASSWORD`).
+   Change it on first login.
 4. Smoke-test `https://quanta-web-staging.fly.dev` (a "STAGING" badge appears
    bottom-right). Hand the URL + seeded test logins to alpha testers.
 
