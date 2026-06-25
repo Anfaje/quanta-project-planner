@@ -28,13 +28,13 @@ fly apps create quanta-api-staging
 fly postgres create --name quanta-db-staging --region ord   # smallest size is fine
 fly postgres attach quanta-db-staging --app quanta-api-staging   # sets DATABASE_URL
 
-# Staging secrets — generate NEW values; never reuse prod's JWT/session secret,
-# or tokens would be valid across environments.
+# Staging secrets — generate NEW values; never reuse prod's SESSION_SECRET,
+# or sessions would be valid across environments. TOTP_ENCRYPTION_KEY must be
+# at least 32 characters.
 fly secrets set --app quanta-api-staging \
-  JWT_SECRET="$(openssl rand -hex 32)" \
   SESSION_SECRET="$(openssl rand -hex 32)" \
-  REDIS_URL="rediss://…staging-upstash…" \
-  SMTP_URL="…catch-all mailbox (Mailtrap/Ethereal) so alpha email never hits real inboxes…"
+  TOTP_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+  REDIS_URL="rediss://…staging-upstash…"
 
 # --- Staging Web ---
 fly apps create quanta-web-staging

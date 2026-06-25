@@ -11,8 +11,10 @@
 #   fly postgres create --name quanta-db-staging --region ord
 #   fly postgres attach quanta-db-staging --app quanta-api-staging
 #   fly secrets set --app quanta-api-staging \
-#       JWT_SECRET=... SESSION_SECRET=... REDIS_URL=... SMTP_URL=...
-#   # (use NEW secrets — never reuse prod's session/JWT secret)
+#       SESSION_SECRET="$(openssl rand -hex 32)" \
+#       TOTP_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+#       REDIS_URL="rediss://…staging-upstash…"
+#   # (use NEW secrets — never reuse prod's SESSION_SECRET)
 #
 # NOTE: still on `prisma db push` to match prod. When we adopt
 # `prisma migrate`, swap the release_command in BOTH this file and
@@ -34,6 +36,7 @@ primary_region = "ord"
   API_PORT    = "4000"
   MFA_ENABLED = "false"
   APP_ENV     = "staging"     # lets the app/log lines self-identify as staging
+  WEB_URL     = "https://quanta-web-staging.fly.dev"  # CORS origin — must match the staging web app
 
 [http_service]
   internal_port       = 4000
