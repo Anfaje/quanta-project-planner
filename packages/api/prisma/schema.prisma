@@ -275,6 +275,7 @@ model UserInvite {
   buId          String       @map("bu_id")                                // BU the new user will belong to
   bu            BusinessUnit @relation(fields: [buId], references: [id])
   projectRole   String?      @map("project_role")                         // optional hint for the invitee
+  roles         Role[]       @default([IC])                                // system roles the invitee receives on accept
   invitedBy     String       @map("invited_by")
   invitedByUser User         @relation("InviteSender", fields: [invitedBy], references: [id])
   expiresAt     DateTime     @map("expires_at")

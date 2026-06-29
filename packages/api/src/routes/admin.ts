@@ -270,7 +270,7 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
     return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
   }
 
-  const { email, buId, name, projectRole } = parsed.data;
+  const { email, buId, name, projectRole, roles } = parsed.data;
 
   // Basic sanity: domain must be whitelisted (same rule as direct signup).
   const domain = email.split("@")[1]?.toLowerCase();
@@ -308,6 +308,7 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
         name,
         buId,
         projectRole,
+        roles: roles ?? ["IC"],
         invitedBy: req.authUser!.id,
         expiresAt,
       },
