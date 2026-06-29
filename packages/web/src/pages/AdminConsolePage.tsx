@@ -489,14 +489,19 @@ function InviteModal({
   const [name, setName] = useState("");
   const [buId, setBuId] = useState(businessUnits.find((b) => b.isActive)?.id ?? "");
   const [projectRole, setProjectRole] = useState("");
+  const [roles, setRoles] = useState<Role[]>(["IC"]);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InviteCreatedResponse | null>(null);
+
+  const toggleRole = (r: Role) =>
+    setRoles((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
 
   const mutation = useMutation({
     mutationFn: () =>
       api.post<InviteCreatedResponse>("/api/admin/users/invite", {
         email,
         buId,
+        roles,
         name: name || undefined,
         projectRole: projectRole || undefined,
       }),
@@ -549,6 +554,36 @@ function InviteModal({
                 ))}
             </select>
           </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Role *
+            </label>
+            <div className="grid grid-cols-5 gap-2">
+              {(["IC", "PM", "AC", "BUL", "AA"] as Role[]).map((r) => {
+                const active = roles.includes(r);
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => toggleRole(r)}
+                    className={`py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                      active
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-white text-gray-500 border-gray-200 hover:border-indigo-300"
+                    }`}
+                    title={roleLabel(r)}
+                  >
+                    {r}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-xs text-gray-400 mt-1.5">
+              {roles.length
+                ? `Signs up as: ${roles.map((r) => roleLabel(r)).join(" · ")}`
+                : "Pick at least one role"}
+            </div>
+          </div>
           <FormInput
             label="Project role"
             value={projectRole}
@@ -564,7 +599,7 @@ function InviteModal({
             <Button
               loading={mutation.isPending}
               onClick={() => mutation.mutate()}
-              disabled={!email || !buId}
+              disabled={!email || !buId || roles.length === 0}
             >
               Create invite
             </Button>

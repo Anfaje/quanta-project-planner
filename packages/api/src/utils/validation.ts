@@ -36,6 +36,7 @@ export const inviteSchema = z.object({
   buId: z.string().uuid("Invalid business unit ID"),
   name: z.string().min(1).max(120).optional(),
   projectRole: z.string().min(1).max(100).optional(),
+  roles: z.array(z.enum(["IC", "PM", "AC", "BUL", "AA"])).min(1, "Select at least one role").optional(),
 });
 
 export const acceptInviteSchema = z.object({
