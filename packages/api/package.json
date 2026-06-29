@@ -14,6 +14,7 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:staging": "tsx prisma/seed.staging.ts",
     "db:reset": "prisma migrate reset --force",
     "db:studio": "prisma studio"
   },

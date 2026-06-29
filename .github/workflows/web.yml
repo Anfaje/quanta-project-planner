@@ -51,14 +51,15 @@ jobs:
         run: npm run build
         working-directory: packages/web
 
-  # ─── Deploy to Fly ──────────────────────────────────────────
+  # ─── Deploy to STAGING ──────────────────────────────────────
+  # Push to main → staging. Production promotion is in promote-prod.yml.
   deploy:
-    name: Deploy to Fly.io
+    name: Deploy to staging
     needs: [test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
-      group: web-deploy-prod
+      group: web-deploy-staging
       cancel-in-progress: false
 
     steps:
@@ -66,8 +67,8 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Deploy
-        run: flyctl deploy --remote-only
+      - name: Deploy to staging
+        run: flyctl deploy --remote-only --config fly.staging.toml
         working-directory: packages/web
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

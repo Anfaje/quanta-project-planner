@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────
+# Quanta API — STAGING Fly app configuration
+#
+# Mirror of fly.toml, pointed at a separate app + database so alpha
+# testing never touches production. Deployed automatically on every
+# push to main by .github/workflows/api.yml:
+#   flyctl deploy --remote-only --config fly.staging.toml
+#
+# One-time provisioning (run locally — needs Fly access):
+#   fly apps create quanta-api-staging
+#   fly postgres create --name quanta-db-staging --region ord
+#   fly postgres attach quanta-db-staging --app quanta-api-staging
+#   fly secrets set --app quanta-api-staging \
+#       SESSION_SECRET="$(openssl rand -hex 32)" \
+#       TOTP_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+#       REDIS_URL="rediss://…staging-upstash…"
+#   # (use NEW secrets — never reuse prod's SESSION_SECRET)
+#
+# NOTE: still on `prisma db push` to match prod. When we adopt
+# `prisma migrate`, swap the release_command in BOTH this file and
+# fly.toml together.
+# ─────────────────────────────────────────────────────────────
+
+app            = "quanta-api-staging"
+primary_region = "ord"
+
+[deploy]
+  release_command = "sh -c 'npx prisma db push --skip-generate --accept-data-loss && npx prisma db execute --schema prisma/schema.prisma --file prisma/backfill_business_unit.sql'"
+  strategy        = "rolling"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV    = "production"  # build/runtime behaviour matches prod; "staging" is a deploy concept, not a NODE_ENV
+  API_PORT    = "4000"
+  MFA_ENABLED = "false"
+  APP_ENV     = "staging"     # lets the app/log lines self-identify as staging
+  WEB_URL     = "https://quanta-web-staging.fly.dev"  # CORS origin — must match the staging web app
+
+[http_service]
+  internal_port       = 4000
+  force_https         = true
+  # Staging traffic is bursty — let it scale to zero between alpha sessions.
+  # Testers may see a brief cold start on the first request; flip these to
+  # match prod (false / 1) if that's annoying.
+  auto_stop_machines   = true
+  auto_start_machines  = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type       = "requests"
+    soft_limit = 50
+    hard_limit = 100
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval     = "15s"
+    method       = "GET"
+    timeout      = "5s"
+    path         = "/api/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "512mb"
