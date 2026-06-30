@@ -81,10 +81,11 @@ router.post("/:token/accept", async (req: Request, res: Response) => {
     return res.status(410).json({ error: "This invitation has expired" });
   }
 
-  // Race: someone may have signed up directly with the same email between
-  // invite creation and now.
+  // A pending user was created when the invite was issued; activating that row
+  // is the normal path. Only block if a *real* (already-activated) account
+  // exists — e.g. someone signed up directly in the meantime.
   const existing = await prisma.user.findUnique({ where: { email: invite.email } });
-  if (existing) {
+  if (existing && existing.isActive) {
     return res.status(409).json({ error: "An account with this email already exists" });
   }
 
@@ -99,17 +100,30 @@ router.post("/:token/accept", async (req: Request, res: Response) => {
 
   try {
     const user = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const created = await tx.user.create({
-        data: {
-          email: invite.email,
-          name: parsed.data.name,
-          passwordHash,
-          roles: invite.roles,
-          projectRoles: invite.projectRole ? [invite.projectRole] : [],
-          primaryBuId: invite.buId,
-          totpSecret: encryptedSecret,
-        },
-      });
+      // Normal path: activate the pending user created at invite time (preserves
+      // any role/BU edits an admin made since). Fallback: if that row is gone
+      // (e.g. the invite/user was deleted), create the account fresh.
+      const created = existing
+        ? await tx.user.update({
+            where: { id: existing.id },
+            data: {
+              name: parsed.data.name,
+              passwordHash,
+              isActive: true,
+              totpSecret: encryptedSecret,
+            },
+          })
+        : await tx.user.create({
+            data: {
+              email: invite.email,
+              name: parsed.data.name,
+              passwordHash,
+              roles: invite.roles,
+              projectRoles: invite.projectRole ? [invite.projectRole] : [],
+              primaryBuId: invite.buId,
+              totpSecret: encryptedSecret,
+            },
+          });
 
       // Consume the invite. Mark as accepted rather than deleting so the
       // audit trail shows who accepted when.

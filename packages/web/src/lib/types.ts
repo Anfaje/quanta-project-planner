@@ -407,6 +407,7 @@ export interface AdminUser {
   financialAccess: boolean;
   costRate: number | null;
   isActive: boolean;
+  status: "active" | "pending" | "deactivated";
   createdAt: string;
   managedAccounts: AccountLite[];
   projectCount: number;

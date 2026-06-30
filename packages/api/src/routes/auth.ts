@@ -137,7 +137,16 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     if (!user.isActive) {
-      return res.status(403).json({ error: "Account has been deactivated" });
+      return res.status(403).json({
+        error:
+          user.passwordHash === null
+            ? "Your account isn't active yet — open your invite link to finish setting up your password."
+            : "Account has been deactivated",
+      });
+    }
+
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: "Invalid email or password" });
     }
 
     const passwordValid = await bcrypt.compare(password, user.passwordHash);

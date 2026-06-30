@@ -41,7 +41,7 @@ model User {
   id              String    @id @default(uuid())
   email           String    @unique
   name            String
-  passwordHash    String    @map("password_hash")
+  passwordHash    String?   @map("password_hash")     // null until an invited user activates their account
   totpSecret      String?   @map("totp_secret")     // AES-encrypted TOTP secret
   totpVerified    Boolean   @default(false) @map("totp_verified")
   roles           Role[]    @default([IC])

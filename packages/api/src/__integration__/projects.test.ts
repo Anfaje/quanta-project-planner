@@ -197,6 +197,59 @@ describe("POST /api/projects", () => {
     expect(inDb?.status).toBe("draft");
   });
 
+  it("can save a draft that staffs an inactive / not-yet-activated user", async () => {
+    const { pm, body } = await basePayload(prisma);
+    const bu = await getDefaultBu(prisma);
+    // Pending (invited, no password) and deactivated users are both isActive:false;
+    // either should be assignable to a draft.
+    const pending = await seedUser(prisma, { buId: bu.id, isActive: false });
+    const agent = await authenticateAs(app, pm.email);
+    const res = await agent
+      .post("/api/projects")
+      .send({
+        ...body,
+        assignments: [
+          ...body.assignments,
+          { userId: pending.id, projectRole: "iOS Dev", billRate: 150, costRate: 80 },
+        ],
+      })
+      .expect(201);
+
+    const count = await prisma.resourceAssignment.count({
+      where: { projectId: res.body.projectId },
+    });
+    expect(count).toBe(2);
+    const a = await prisma.resourceAssignment.findFirst({
+      where: { projectId: res.body.projectId, userId: pending.id },
+    });
+    expect(a).not.toBeNull();
+  });
+
+  it("can add an inactive / not-yet-activated user to an existing draft", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const pm = await seedUser(prisma, { buId: bu.id, roles: ["PM"] });
+    const draft = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: pm.id,
+      status: "draft",
+      assignments: [{ userId: pm.id, projectRole: "PM" }],
+    });
+    const pending = await seedUser(prisma, { buId: bu.id, isActive: false });
+
+    const agent = await authenticateAs(app, pm.email);
+    await agent
+      .post(`/api/projects/${draft.id}/assignments`)
+      .send({ userId: pending.id, projectRole: "iOS Dev", billRate: 150, costRate: 80 })
+      .expect(201);
+
+    const a = await prisma.resourceAssignment.findFirst({
+      where: { projectId: draft.id, userId: pending.id },
+    });
+    expect(a).not.toBeNull();
+  });
+
   it("403 when a PM tries to launch directly (no saveAsDraft)", async () => {
     const { pm, body } = await basePayload(prisma);
     const agent = await authenticateAs(app, pm.email);
