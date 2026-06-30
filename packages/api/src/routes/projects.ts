@@ -396,14 +396,16 @@ router.post("/", async (req: Request, res: Response) => {
   const codeClash = await prisma.project.findUnique({ where: { projectCode: data.projectCode } });
   if (codeClash) return res.status(409).json({ error: "Project code already in use" });
 
-  // Verify all assignment users exist + active
+  // Verify all assignment users exist. Inactive (deactivated) and not-yet-
+  // activated (invited) users are allowed on a draft — the approve step
+  // re-checks that assignees are active before the project can go live.
   const userIds = data.assignments.map((a) => a.userId);
   const users = await prisma.user.findMany({
-    where: { id: { in: userIds }, isActive: true },
+    where: { id: { in: userIds } },
     select: { id: true, primaryBu: { select: { code: true } } },
   });
   if (users.length !== userIds.length) {
-    return res.status(400).json({ error: "One or more assigned users not found or inactive" });
+    return res.status(400).json({ error: "One or more assigned users not found" });
   }
   const userBuMap = new Map(users.map((u) => [u.id, u.primaryBu?.code ?? ""]));
 
@@ -986,8 +988,8 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
     where: { id: data.userId },
     include: { primaryBu: { select: { code: true } } },
   });
-  if (!targetUser || !targetUser.isActive) {
-    return res.status(400).json({ error: "User not found or inactive" });
+  if (!targetUser) {
+    return res.status(400).json({ error: "User not found" });
   }
 
   const existing = await prisma.resourceAssignment.findUnique({

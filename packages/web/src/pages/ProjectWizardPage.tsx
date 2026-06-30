@@ -639,7 +639,8 @@ function Step2Resources({
   // users array is sorted by name on the API side already.
   const selectedIds = new Set(state.resources.map((r) => r.userId));
   const visibleUsers = users.filter((u) => {
-    if (u.status === "deactivated") return false; // include pending (invited) users; hide only deactivated
+    // Inactive (deactivated) and invited (pending) users are both assignable to
+    // drafts, so don't filter on status here — only BU + search.
     if (buFilter && u.primaryBu) {
       const buId = bus.find((b) => b.code === u.primaryBu!.code)?.id;
       if (buId !== buFilter) return false;
@@ -733,6 +734,11 @@ function Step2Resources({
                       {u.status === "pending" && (
                         <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-600 bg-amber-50 px-1 py-0.5 rounded">
                           invited
+                        </span>
+                      )}
+                      {u.status === "deactivated" && (
+                        <span className="text-[9px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-100 px-1 py-0.5 rounded">
+                          inactive
                         </span>
                       )}
                     </div>
