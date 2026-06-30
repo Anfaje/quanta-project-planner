@@ -88,6 +88,10 @@ export function ProjectDetailPage() {
   }
 
   const p = data.project;
+  // Hide the Financials tab entirely for users without financial access (the
+  // API omits fee figures for them) rather than showing an empty-state prompt.
+  const hasFinancials = data.financials.totalFee !== undefined;
+  const visibleTabs = hasFinancials ? TABS : TABS.filter((t) => t.id !== "financials");
   const exportCsv = () => api.download(`/api/projects/${p.id}/export.csv`);
   const exportPdf = () => api.download(`/api/projects/${p.id}/export.pdf`);
 
@@ -166,7 +170,7 @@ export function ProjectDetailPage() {
       <SummaryMetrics data={data} />
 
       {/* ── Tabs ── */}
-      <Tabs tabs={TABS} active={tab} onChange={setTab} className="mt-6" />
+      <Tabs tabs={visibleTabs} active={tab} onChange={setTab} className="mt-6" />
 
       <div className="mt-6">
         <TabPanel id="overview" active={tab === "overview"}>
@@ -178,9 +182,11 @@ export function ProjectDetailPage() {
         <TabPanel id="burn" active={tab === "burn"}>
           <BurnChartPanel projectId={p.id} />
         </TabPanel>
-        <TabPanel id="financials" active={tab === "financials"}>
-          <FinancialsPanel detail={data} />
-        </TabPanel>
+        {hasFinancials && (
+          <TabPanel id="financials" active={tab === "financials"}>
+            <FinancialsPanel detail={data} />
+          </TabPanel>
+        )}
       </div>
     </Layout>
   );
