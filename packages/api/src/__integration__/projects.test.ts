@@ -250,6 +250,70 @@ describe("POST /api/projects", () => {
     expect(a).not.toBeNull();
   });
 
+  it("PUT /:id replaces a draft's plan (details, resources, hours)", async () => {
+    const { pm, body, bu } = await basePayload(prisma);
+    const agent = await authenticateAs(app, pm.email);
+    const created = await agent.post("/api/projects").send(body).expect(201);
+    const projectId = created.body.projectId;
+
+    const other = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+
+    const res = await agent.put(`/api/projects/${projectId}`).send({
+      ...body,
+      name: "Renamed Draft",
+      contingencyPct: 0.2,
+      assignments: [
+        { userId: pm.id, projectRole: "PM", billRate: 200, costRate: 100 },
+        { userId: other.id, projectRole: "iOS Dev", billRate: 150, costRate: 80 },
+      ],
+      plannedHours: [{ userId: other.id, projectWeek: 0, plannedHours: 10 }],
+    });
+    expect(res.status).toBe(200);
+
+    const proj = await prisma.project.findUnique({ where: { id: projectId } });
+    expect(proj?.name).toBe("Renamed Draft");
+    expect(Number(proj?.contingencyPct)).toBeCloseTo(0.2);
+    expect(proj?.status).toBe("draft"); // still a draft
+    expect(proj?.projectCode).toBe(body.projectCode); // code preserved
+
+    const assignments = await prisma.resourceAssignment.findMany({ where: { projectId } });
+    expect(assignments).toHaveLength(2);
+    const otherAssignment = assignments.find((a) => a.userId === other.id);
+    expect(otherAssignment).toBeTruthy();
+    const he = await prisma.hourEntry.findFirst({
+      where: { assignmentId: otherAssignment!.id, projectWeek: 0 },
+    });
+    expect(he?.plannedHours == null ? null : Number(he.plannedHours)).toBe(10);
+  });
+
+  it("PUT /:id 409s on a non-draft project", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    const active = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: aa!.id,
+      status: "active",
+      assignments: [{ userId: aa!.id, projectRole: "AA" }],
+    });
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const res = await agent.put(`/api/projects/${active.id}`).send({
+      name: "Nope",
+      accountId: account.id,
+      owningBuId: bu.id,
+      projectCode: active.projectCode,
+      startDate: "2026-03-01",
+      endDate: "2026-03-29",
+      contingencyPct: 0.15,
+      pricingModel: "time_and_materials",
+      assignments: [{ userId: aa!.id, projectRole: "AA", billRate: 200, costRate: 100 }],
+      plannedHours: [],
+      saveAsDraft: true,
+    });
+    expect(res.status).toBe(409);
+  });
+
   it("403 when a PM tries to launch directly (no saveAsDraft)", async () => {
     const { pm, body } = await basePayload(prisma);
     const agent = await authenticateAs(app, pm.email);

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import type { ProjectDetail, Me } from "../lib/types";
 import { useMe } from "../context/AuthContext";
@@ -198,6 +198,7 @@ export function ProjectDetailPage() {
 
 function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const p = data.project;
   const caps = data.capabilities;
   const isOwner = me.id === p.createdBy.id;
@@ -269,6 +270,15 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
             </div>
 
             <div className="flex items-center gap-2">
+              {(isOwner || caps.canManage) && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => navigate(`/projects/${p.id}/edit`)}
+                >
+                  Edit
+                </Button>
+              )}
               {caps.canManageReviewers && (
                 <Button variant="secondary" size="sm" onClick={() => setReviewerOpen(true)}>
                   Share

@@ -57,6 +57,7 @@ function detail(opts: {
       projectCode: "DRF-1",
       status: "draft",
       pricingModel: "time_and_materials",
+      fixedPrice: null,
       description: null,
       rejectionNote: null,
       rejectionAt: null,

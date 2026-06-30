@@ -325,6 +325,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       projectCode: project.projectCode,
       status: project.status,
       pricingModel: project.pricingModel,
+      fixedPrice: project.fixedPrice != null ? Number(project.fixedPrice) : null,
       description: project.description,
       rejectionNote: project.rejectionNote,
       rejectionAt: project.rejectionAt,
@@ -507,6 +508,141 @@ router.post("/", async (req: Request, res: Response) => {
   } catch (err: any) {
     logger.error({ err }, "Failed to create project");
     res.status(500).json({ error: "Failed to create project" });
+  }
+});
+
+/**
+ * PUT /api/projects/:id
+ * Replace a DRAFT's entire plan (details + resources + planned hours) from the
+ * wizard. Drafts only — safe because a draft has no committed hours or baseline.
+ * The project code, status, and creator are preserved; everything else is rebuilt.
+ */
+router.put("/:id", async (req: Request, res: Response) => {
+  const parsed = createProjectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+  const data = parsed.data;
+  const user = req.authUser!;
+  const isFixedPrice = data.pricingModel === "fixed_price";
+
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+  if (ctx.status !== "draft") {
+    return res.status(409).json({ error: "Only draft projects can be edited in the planner" });
+  }
+
+  const isDraftOwner = ctx.createdById === user.id;
+  if (
+    !isDraftOwner &&
+    (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
+      !canManageProject(user))
+  ) {
+    return res.status(403).json({ error: "Cannot manage this project" });
+  }
+  // Authority to place the draft in the (possibly changed) account/BU.
+  if (!canCreateProject(user, data.accountId, data.owningBuId)) {
+    return res.status(403).json({ error: "Cannot place this project in that account/BU" });
+  }
+
+  const [account, bu] = await Promise.all([
+    prisma.account.findUnique({ where: { id: data.accountId } }),
+    prisma.businessUnit.findUnique({ where: { id: data.owningBuId } }),
+  ]);
+  if (!account || !account.isActive) return res.status(400).json({ error: "Account not found or inactive" });
+  if (!bu || !bu.isActive) return res.status(400).json({ error: "Business unit not found or inactive" });
+
+  // Assignment users must exist (inactive / invited users are allowed on a draft).
+  const userIds = data.assignments.map((a) => a.userId);
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, primaryBu: { select: { code: true } } },
+  });
+  if (users.length !== userIds.length) {
+    return res.status(400).json({ error: "One or more assigned users not found" });
+  }
+  const userBuMap = new Map(users.map((u) => [u.id, u.primaryBu?.code ?? ""]));
+
+  const startDate = new Date(data.startDate + "T00:00:00Z");
+  const endDate = new Date(data.endDate + "T00:00:00Z");
+  const totalWeeks = countProjectWeeks(startDate, endDate);
+
+  for (const ph of data.plannedHours) {
+    if (ph.projectWeek >= totalWeeks) {
+      return res
+        .status(400)
+        .json({ error: `plannedHours.projectWeek ${ph.projectWeek} out of range (0..${totalWeeks - 1})` });
+    }
+    if (!userIds.includes(ph.userId)) {
+      return res
+        .status(400)
+        .json({ error: `plannedHours references userId not in assignments: ${ph.userId}` });
+    }
+  }
+  const plannedMap = new Map<string, number>();
+  for (const ph of data.plannedHours) {
+    plannedMap.set(`${ph.userId}|${ph.projectWeek}`, ph.plannedHours);
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.project.update({
+        where: { id: ctx.id },
+        data: {
+          name: data.name,
+          accountId: data.accountId,
+          owningBuId: data.owningBuId,
+          startDate,
+          endDate,
+          contingencyPct: new Prisma.Decimal(isFixedPrice ? 0 : data.contingencyPct),
+          pricingModel: data.pricingModel,
+          fixedPrice: isFixedPrice ? new Prisma.Decimal(data.fixedPrice!) : null,
+          description: data.description,
+          // projectCode + status + createdById are intentionally preserved.
+        },
+      });
+
+      // Rebuild the plan: drop existing assignments (cascades their hour entries)
+      // and recreate from the payload.
+      await tx.resourceAssignment.deleteMany({ where: { projectId: ctx.id } });
+
+      for (const a of data.assignments) {
+        const assignment = await tx.resourceAssignment.create({
+          data: {
+            projectId: ctx.id,
+            userId: a.userId,
+            projectRole: a.projectRole,
+            billRate: isFixedPrice ? null : new Prisma.Decimal(a.billRate!),
+            costRate: new Prisma.Decimal(a.costRate),
+            businessUnit: userBuMap.get(a.userId) ?? "",
+          },
+        });
+        const entries = Array.from({ length: totalWeeks }, (_, w) => {
+          const planned = plannedMap.get(`${a.userId}|${w}`);
+          return {
+            assignmentId: assignment.id,
+            projectWeek: w,
+            weekStartDate: weekStartDate(startDate, w),
+            plannedHours: planned != null ? new Prisma.Decimal(planned) : null,
+            actualHours: null,
+            locked: false,
+          };
+        });
+        if (entries.length > 0) {
+          await tx.hourEntry.createMany({ data: entries });
+        }
+      }
+    });
+
+    await logChanges("Project", ctx.id, user.id, [
+      { field: "plan", oldValue: null, newValue: "draft plan replaced via planner" },
+    ]);
+
+    logger.info({ projectId: ctx.id, actor: user.id }, "Draft plan replaced");
+    res.json({ projectId: ctx.id, status: "draft" });
+  } catch (err: any) {
+    logger.error({ err }, "Failed to update draft plan");
+    res.status(500).json({ error: "Failed to update draft" });
   }
 });
 
