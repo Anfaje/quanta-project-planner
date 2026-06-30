@@ -234,6 +234,10 @@ router.put("/users/:id/deactivate", requireRoles(Role.BUL, Role.AA), async (req:
   const target = await prisma.user.findUnique({ where: { id: req.params.id } });
   if (!target) return res.status(404).json({ error: "User not found" });
 
+  if (target.id === req.authUser!.id) {
+    return res.status(400).json({ error: "You can't deactivate your own account" });
+  }
+
   // BUL can only deactivate users in their BU
   if (req.authUser!.roles.includes(Role.BUL) && !req.authUser!.roles.includes(Role.AA)) {
     if (target.primaryBuId !== req.authUser!.primaryBuId) {

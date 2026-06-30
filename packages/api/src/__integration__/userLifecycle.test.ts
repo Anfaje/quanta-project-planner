@@ -188,3 +188,22 @@ describe("DELETE /api/admin/users/:id (AA, safe)", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("self-protection on deactivate / delete", () => {
+  it("refuses to deactivate your own account (400)", async () => {
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    const res = await agent.put(`/api/admin/users/${aa!.id}/deactivate`);
+    expect(res.status).toBe(400);
+    const fresh = await prisma.user.findUnique({ where: { id: aa!.id } });
+    expect(fresh?.isActive).toBe(true);
+  });
+
+  it("refuses to delete your own account (400)", async () => {
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    const res = await agent.delete(`/api/admin/users/${aa!.id}`);
+    expect(res.status).toBe(400);
+    expect(await prisma.user.findUnique({ where: { id: aa!.id } })).not.toBeNull();
+  });
+});
