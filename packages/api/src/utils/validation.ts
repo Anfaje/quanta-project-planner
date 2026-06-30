@@ -39,6 +39,21 @@ export const inviteSchema = z.object({
   roles: z.array(z.enum(["IC", "PM", "AC", "BUL", "AA"])).min(1, "Select at least one role").optional(),
 });
 
+// Self-service account edits (PATCH /api/me). Deliberately limited to safe
+// fields — a user can set their display name and preferred project-role
+// labels, but NOT their system roles, financial access, or BU.
+export const updateMeSchema = z.object({
+  name: z.string().min(1, "Name is required").max(120).optional(),
+  projectRoles: z.array(z.string().min(1).max(60)).max(20).optional(),
+});
+
+// Change own password (POST /api/me/change-password): verify the current
+// password, then set a new one held to the same 8-char minimum as signup.
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(8, "Password must be at least 8 characters").max(100),
+});
+
 export const acceptInviteSchema = z.object({
   name: z.string().min(1, "Name is required").max(120),
   password: z

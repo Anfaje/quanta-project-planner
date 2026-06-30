@@ -2,6 +2,7 @@ import { ReactNode, useState, useRef, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { QuantaLogo } from "./QuantaLogo";
+import { AccountModal } from "./AccountModal";
 
 /**
  * App shell — horizontal top nav, flat content container beneath. Persistent
@@ -33,6 +34,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const { me, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close user menu on outside click.
@@ -126,6 +128,16 @@ export function Layout({ children }: { children: ReactNode }) {
                   role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
+                    setAccountOpen(true);
+                  }}
+                  className="w-full px-4 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 transition-colors border-b border-gray-100"
+                >
+                  My account
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
                     void logout().then(() => navigate("/login", { replace: true }));
                   }}
                   className="w-full px-4 py-2.5 text-sm text-left text-gray-700 hover:bg-gray-50 transition-colors"
@@ -140,6 +152,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* ── Page body ── */}
       <main className="max-w-7xl mx-auto px-6 py-8">{children}</main>
+      {accountOpen && <AccountModal onClose={() => setAccountOpen(false)} />}
     </div>
   );
 }

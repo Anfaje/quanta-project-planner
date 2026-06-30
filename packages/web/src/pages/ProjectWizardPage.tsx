@@ -639,7 +639,7 @@ function Step2Resources({
   // users array is sorted by name on the API side already.
   const selectedIds = new Set(state.resources.map((r) => r.userId));
   const visibleUsers = users.filter((u) => {
-    if (!u.isActive) return false;
+    if (u.status === "deactivated") return false; // include pending (invited) users; hide only deactivated
     if (buFilter && u.primaryBu) {
       const buId = bus.find((b) => b.code === u.primaryBu!.code)?.id;
       if (buId !== buFilter) return false;
@@ -728,7 +728,14 @@ function Step2Resources({
                   }`}
                 >
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-800 truncate">{u.name}</div>
+                    <div className="text-sm font-medium text-gray-800 truncate flex items-center gap-1.5">
+                      {u.name}
+                      {u.status === "pending" && (
+                        <span className="text-[9px] font-semibold uppercase tracking-wide text-amber-600 bg-amber-50 px-1 py-0.5 rounded">
+                          invited
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] text-gray-400 truncate">
                       {u.email}
                       {u.projectRoles.length > 0 && <> · {u.projectRoles.slice(0, 2).join(", ")}</>}

@@ -128,6 +128,18 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin", "users"] }),
   });
 
+  const [deleting, setDeleting] = useState<AdminUser | null>(null);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/api/admin/users/${id}`),
+    onSuccess: () => {
+      setDeleting(null);
+      setDeleteErr(null);
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
+    onError: (err) => setDeleteErr(err instanceof ApiError ? err.message : "Could not delete user"),
+  });
+
   const [costEditing, setCostEditing] = useState<AdminUser | null>(null);
   const costRateMutation = useMutation({
     mutationFn: (args: { id: string; costRate: number | null }) =>
@@ -215,10 +227,12 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
                       {u.projectCount}
                     </td>
                     <td className="px-6 py-3 text-right">
-                      {u.isActive ? (
+                      {u.status === "active" ? (
                         <Badge tone="emerald">active</Badge>
+                      ) : u.status === "pending" ? (
+                        <Badge tone="amber">invited</Badge>
                       ) : (
-                        <Badge tone="gray">inactive</Badge>
+                        <Badge tone="gray">deactivated</Badge>
                       )}
                     </td>
                     <td className="px-6 py-3 text-right">
@@ -237,13 +251,27 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
                             Deactivate
                           </Button>
                         ) : (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => reactivateMutation.mutate(u.id)}
-                          >
-                            Reactivate
-                          </Button>
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => reactivateMutation.mutate(u.id)}
+                            >
+                              Reactivate
+                            </Button>
+                            {canEditAll && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setDeleteErr(null);
+                                  setDeleting(u);
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
@@ -303,6 +331,26 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
           }}
         />
       )}
+
+      <ConfirmModal
+        open={deleting !== null}
+        title="Delete user"
+        tone="danger"
+        confirmLabel="Delete"
+        loading={deleteMutation.isPending}
+        message={
+          <>
+            Permanently delete <strong>{deleting?.name}</strong> ({deleting?.email})? This
+            can&rsquo;t be undone.
+            {deleteErr && <span className="block mt-3 text-rose-600">{deleteErr}</span>}
+          </>
+        }
+        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+        onCancel={() => {
+          setDeleting(null);
+          setDeleteErr(null);
+        }}
+      />
     </div>
   );
 }

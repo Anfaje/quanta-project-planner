@@ -42,6 +42,7 @@ router.get("/users", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (r
       financialAccess: true,
       costRate: true,
       isActive: true,
+      passwordHash: true,
       createdAt: true,
       primaryBu: { select: { code: true, name: true } },
       managedAccounts: {
@@ -62,6 +63,7 @@ router.get("/users", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (r
     financialAccess: u.financialAccess,
     costRate: u.costRate != null ? Number(u.costRate) : null,
     isActive: u.isActive,
+    status: u.isActive ? "active" : u.passwordHash == null ? "pending" : "deactivated",
     createdAt: u.createdAt,
     managedAccounts: u.managedAccounts.map((m) => m.account),
     projectCount: u._count.assignments,
@@ -259,6 +261,71 @@ router.put("/users/:id/reactivate", requireRoles(Role.BUL, Role.AA), async (req:
 });
 
 /**
+ * DELETE /api/admin/users/:id — AA only.
+ * Hard-deletes an INACTIVE user, but only when they carry no dependent records
+ * (assignments, created projects, reviewer roles, audit history, invites sent,
+ * baselines). Users with history can be deactivated but not deleted. Any
+ * pending invite to their email is cleaned up; AccountManager + password-reset
+ * rows cascade automatically.
+ */
+router.delete("/users/:id", requireRoles(Role.AA), async (req: Request, res: Response) => {
+  const target = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      email: true,
+      isActive: true,
+      _count: {
+        select: {
+          assignments: true,
+          projectsCreated: true,
+          reviewingProjects: true,
+          reviewerAdds: true,
+          auditLogs: true,
+          domainsAdded: true,
+          invitesSent: true,
+          baselinesCaptured: true,
+        },
+      },
+    },
+  });
+
+  if (!target) return res.status(404).json({ error: "User not found" });
+  if (target.id === req.authUser!.id) {
+    return res.status(400).json({ error: "You can't delete your own account" });
+  }
+  if (target.isActive) {
+    return res.status(409).json({ error: "Only inactive users can be deleted — deactivate them first" });
+  }
+
+  const c = target._count;
+  const blockers: string[] = [];
+  if (c.assignments) blockers.push(`${c.assignments} project assignment(s)`);
+  if (c.projectsCreated) blockers.push(`${c.projectsCreated} created project(s)`);
+  if (c.reviewingProjects || c.reviewerAdds) blockers.push("project reviewer roles");
+  if (c.auditLogs) blockers.push("audit history");
+  if (c.domainsAdded) blockers.push("domain whitelist entries");
+  if (c.invitesSent) blockers.push("invitations they sent");
+  if (c.baselinesCaptured) blockers.push("plan baselines");
+  if (blockers.length > 0) {
+    return res.status(409).json({
+      error: `Can't delete this user — they still have ${blockers.join(", ")}. Keep them deactivated instead.`,
+    });
+  }
+
+  await prisma.$transaction([
+    prisma.userInvite.deleteMany({ where: { email: target.email } }),
+    prisma.user.delete({ where: { id: target.id } }),
+  ]);
+
+  await logChanges("User", target.id, req.authUser!.id, [
+    { field: "deleted", oldValue: target.email, newValue: null },
+  ]);
+
+  res.json({ message: "User deleted" });
+});
+
+/**
  * POST /api/admin/users/invite
  * Creates a signed invitation. In production this would email the invitee;
  * for now the token is returned in the response so the inviter can share the
@@ -282,10 +349,19 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
     });
   }
 
-  // Can't invite someone who already has an account.
-  const existingUser = await prisma.user.findUnique({ where: { email } });
-  if (existingUser) {
-    return res.status(409).json({ error: "An account with this email already exists" });
+  // Block re-inviting a real account (active or deactivated). A pending invite
+  // — the inactive, password-less row created below — may be re-invited; that
+  // just refreshes the link and details.
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+    select: { isActive: true, passwordHash: true },
+  });
+  if (existingUser && !(existingUser.passwordHash === null && !existingUser.isActive)) {
+    return res.status(409).json({
+      error: existingUser.isActive
+        ? "An account with this email already exists"
+        : "A deactivated account with this email exists — reactivate it instead",
+    });
   }
 
   // BU must exist and be active.
@@ -301,6 +377,26 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
 
   await prisma.$transaction([
     prisma.userInvite.deleteMany({ where: { email, acceptedAt: null } }),
+    // Create the user up front — inactive, no password — so they can be staffed
+    // onto projects before they accept. A re-invite refreshes the pending row.
+    prisma.user.upsert({
+      where: { email },
+      update: {
+        name,
+        primaryBuId: buId,
+        roles: roles ?? ["IC"],
+        projectRoles: projectRole ? [projectRole] : [],
+      },
+      create: {
+        email,
+        name: name ?? email.split("@")[0],
+        primaryBuId: buId,
+        roles: roles ?? ["IC"],
+        projectRoles: projectRole ? [projectRole] : [],
+        passwordHash: null,
+        isActive: false,
+      },
+    }),
     prisma.userInvite.create({
       data: {
         token,
