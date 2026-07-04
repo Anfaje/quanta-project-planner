@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import type { ProjectDetail, Me } from "../lib/types";
 import { useMe } from "../context/AuthContext";
@@ -88,6 +88,10 @@ export function ProjectDetailPage() {
   }
 
   const p = data.project;
+  // Hide the Financials tab entirely for users without financial access (the
+  // API omits fee figures for them) rather than showing an empty-state prompt.
+  const hasFinancials = data.financials.totalFee !== undefined;
+  const visibleTabs = hasFinancials ? TABS : TABS.filter((t) => t.id !== "financials");
   const exportCsv = () => api.download(`/api/projects/${p.id}/export.csv`);
   const exportPdf = () => api.download(`/api/projects/${p.id}/export.pdf`);
 
@@ -166,7 +170,7 @@ export function ProjectDetailPage() {
       <SummaryMetrics data={data} />
 
       {/* ── Tabs ── */}
-      <Tabs tabs={TABS} active={tab} onChange={setTab} className="mt-6" />
+      <Tabs tabs={visibleTabs} active={tab} onChange={setTab} className="mt-6" />
 
       <div className="mt-6">
         <TabPanel id="overview" active={tab === "overview"}>
@@ -178,9 +182,11 @@ export function ProjectDetailPage() {
         <TabPanel id="burn" active={tab === "burn"}>
           <BurnChartPanel projectId={p.id} />
         </TabPanel>
-        <TabPanel id="financials" active={tab === "financials"}>
-          <FinancialsPanel detail={data} />
-        </TabPanel>
+        {hasFinancials && (
+          <TabPanel id="financials" active={tab === "financials"}>
+            <FinancialsPanel detail={data} />
+          </TabPanel>
+        )}
       </div>
     </Layout>
   );
@@ -192,6 +198,7 @@ export function ProjectDetailPage() {
 
 function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const p = data.project;
   const caps = data.capabilities;
   const isOwner = me.id === p.createdBy.id;
@@ -263,6 +270,15 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
             </div>
 
             <div className="flex items-center gap-2">
+              {(isOwner || caps.canManage) && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => navigate(`/projects/${p.id}/edit`)}
+                >
+                  Edit
+                </Button>
+              )}
               {caps.canManageReviewers && (
                 <Button variant="secondary" size="sm" onClick={() => setReviewerOpen(true)}>
                   Share

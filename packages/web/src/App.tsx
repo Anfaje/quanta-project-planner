@@ -105,6 +105,14 @@ export default function App() {
             }
           />
           <Route
+            path="/projects/:id/edit"
+            element={
+              <ProtectedRoute>
+                <ProjectWizardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/projects/drafts"
             element={
               <ProtectedRoute>

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type { AdminUser, UserLite } from "../lib/types";
 import { Modal, Button, Alert, Spinner } from "./ui";
+import { useMe } from "../context/AuthContext";
 
 /**
  * Share a DRAFT project with colleagues for review (the draft-workflow analogue
@@ -39,6 +40,7 @@ export function ReviewerShareModal({
   doneLabel = "Done",
 }: Props) {
   const qc = useQueryClient();
+  const me = useMe();
   const [current, setCurrent] = useState<UserLite[]>(reviewers);
   const [selectedUser, setSelectedUser] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -56,8 +58,10 @@ export function ReviewerShareModal({
 
   const currentIds = useMemo(() => new Set(current.map((u) => u.id)), [current]);
   const addable = useMemo(
-    () => (usersData?.users ?? []).filter((u) => u.isActive && !currentIds.has(u.id)),
-    [usersData, currentIds]
+    // Exclude the current user — you can't add yourself as a reviewer of your
+    // own draft — alongside already-added reviewers and inactive accounts.
+    () => (usersData?.users ?? []).filter((u) => u.isActive && u.id !== me.id && !currentIds.has(u.id)),
+    [usersData, currentIds, me.id]
   );
 
   const invalidate = () => {

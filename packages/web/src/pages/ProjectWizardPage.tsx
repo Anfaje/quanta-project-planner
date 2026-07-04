@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useId, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import type {
   AdminAccount,
   AdminBusinessUnit,
   AdminUser,
   PricingModel,
+  ProjectDetail,
+  HoursGrid,
 } from "../lib/types";
 import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
@@ -106,6 +108,8 @@ function weekStart(startISO: string, week: number): Date {
 export function ProjectWizardPage() {
   const navigate = useNavigate();
   const me = useMe();
+  const { id: editId } = useParams<{ id?: string }>();
+  const isEdit = Boolean(editId);
 
   // Reference data fetches for dropdowns.
   const accountsQ = useQuery({
@@ -119,6 +123,17 @@ export function ProjectWizardPage() {
   const usersQ = useQuery({
     queryKey: ["admin", "users"],
     queryFn: () => api.get<{ users: AdminUser[] }>("/api/admin/users"),
+  });
+  // Edit mode: load the draft + its hours grid to hydrate the wizard.
+  const draftQ = useQuery({
+    queryKey: ["project", editId],
+    queryFn: () => api.get<ProjectDetail>(`/api/projects/${editId}`),
+    enabled: isEdit,
+  });
+  const hoursQ = useQuery({
+    queryKey: ["project", editId, "hours"],
+    queryFn: () => api.get<HoursGrid>(`/api/projects/${editId}/hours`),
+    enabled: isEdit,
   });
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -140,6 +155,47 @@ export function ProjectWizardPage() {
   // After "Save as draft" succeeds we hold the new draft's id to open the
   // share dialog; closing it navigates to the draft.
   const [draftToShare, setDraftToShare] = useState<string | null>(null);
+  const [editLoaded, setEditLoaded] = useState(false);
+
+  // In edit mode, hydrate the wizard once from the draft + its hours grid.
+  useEffect(() => {
+    if (!isEdit || editLoaded || !draftQ.data || !hoursQ.data) return;
+    const p = draftQ.data.project;
+    const resources: ResourceDraft[] = hoursQ.data.assignments.map((a) => ({
+      userId: a.userId,
+      name: a.user.name,
+      email: a.user.email,
+      businessUnit: a.businessUnit,
+      projectRole: a.projectRole,
+      billRate: a.billRate ?? 175,
+      costRate: a.costRate ?? 0,
+      baselineCost: a.costRate ?? 0,
+      costOverridden: true, // preserve the saved cost; don't auto-recompute markup
+    }));
+    const planned = new Map<string, number>();
+    for (const a of hoursQ.data.assignments) {
+      for (const e of a.entries) {
+        if (e.plannedHours != null && e.plannedHours > 0) {
+          planned.set(`${a.userId}|${e.week}`, e.plannedHours);
+        }
+      }
+    }
+    setState({
+      name: p.name,
+      accountId: p.account.id,
+      owningBuId: p.owningBu.id,
+      projectCode: p.projectCode,
+      startDate: p.startDate.slice(0, 10),
+      endDate: p.endDate.slice(0, 10),
+      contingencyPct: p.contingencyPct,
+      pricingModel: p.pricingModel,
+      fixedPrice: p.fixedPrice ?? 0,
+      description: p.description ?? "",
+      resources,
+      plannedHours: planned,
+    });
+    setEditLoaded(true);
+  }, [isEdit, editLoaded, draftQ.data, hoursQ.data]);
 
   // Only an AA, or the BUL of the owning BU, may launch a project directly.
   // Everyone else (PMs) saves a draft for approval.
@@ -149,39 +205,41 @@ export function ProjectWizardPage() {
 
   const totalWeeks = countWeeks(state.startDate, state.endDate);
 
+  const buildPayload = (saveAsDraft: boolean) => {
+    const isFixedPrice = state.pricingModel === "fixed_price";
+    return {
+      name: state.name,
+      accountId: state.accountId,
+      owningBuId: state.owningBuId,
+      projectCode: state.projectCode,
+      startDate: state.startDate,
+      endDate: state.endDate,
+      contingencyPct: state.contingencyPct,
+      pricingModel: state.pricingModel,
+      ...(isFixedPrice ? { fixedPrice: state.fixedPrice } : {}),
+      description: state.description || undefined,
+      assignments: state.resources.map((r) => ({
+        userId: r.userId,
+        projectRole: r.projectRole,
+        billRate: isFixedPrice ? undefined : r.billRate,
+        costRate: r.costRate,
+      })),
+      plannedHours: Array.from(state.plannedHours.entries())
+        .map(([key, hours]) => {
+          const [userId, weekStr] = key.split("|");
+          return { userId, projectWeek: Number(weekStr), plannedHours: hours };
+        })
+        .filter((e) => e.plannedHours > 0),
+      saveAsDraft,
+    };
+  };
+
   const createMutation = useMutation({
-    mutationFn: async (saveAsDraft: boolean) => {
-      const isFixedPrice = state.pricingModel === "fixed_price";
-      const payload = {
-        name: state.name,
-        accountId: state.accountId,
-        owningBuId: state.owningBuId,
-        projectCode: state.projectCode,
-        startDate: state.startDate,
-        endDate: state.endDate,
-        contingencyPct: state.contingencyPct,
-        pricingModel: state.pricingModel,
-        ...(isFixedPrice ? { fixedPrice: state.fixedPrice } : {}),
-        description: state.description || undefined,
-        assignments: state.resources.map((r) => ({
-          userId: r.userId,
-          projectRole: r.projectRole,
-          billRate: isFixedPrice ? undefined : r.billRate,
-          costRate: r.costRate,
-        })),
-        plannedHours: Array.from(state.plannedHours.entries())
-          .map(([key, hours]) => {
-            const [userId, weekStr] = key.split("|");
-            return { userId, projectWeek: Number(weekStr), plannedHours: hours };
-          })
-          .filter((e) => e.plannedHours > 0),
-        saveAsDraft,
-      };
-      return api.post<{ projectId: string; projectCode: string; status: string }>(
+    mutationFn: async (saveAsDraft: boolean) =>
+      api.post<{ projectId: string; projectCode: string; status: string }>(
         "/api/projects",
-        payload
-      );
-    },
+        buildPayload(saveAsDraft)
+      ),
     onSuccess: (res, saveAsDraft) => {
       if (saveAsDraft) {
         // Prompt to share the new draft; navigation happens when the dialog closes.
@@ -192,6 +250,16 @@ export function ProjectWizardPage() {
     },
     onError: (err) => {
       setSubmitError(err instanceof ApiError ? err.message : "Failed to create project");
+    },
+  });
+
+  // Edit mode: replace the draft's whole plan, then return to its detail page.
+  const editMutation = useMutation({
+    mutationFn: async () =>
+      api.put<{ projectId: string; status: string }>(`/api/projects/${editId}`, buildPayload(true)),
+    onSuccess: (res) => navigate(`/projects/${res.projectId}`),
+    onError: (err) => {
+      setSubmitError(err instanceof ApiError ? err.message : "Failed to save changes");
     },
   });
 
@@ -227,14 +295,22 @@ export function ProjectWizardPage() {
     }
   };
 
-  const isLoading = accountsQ.isLoading || busQ.isLoading || usersQ.isLoading;
-  const loadError = accountsQ.error || busQ.error || usersQ.error;
+  const isLoading =
+    accountsQ.isLoading ||
+    busQ.isLoading ||
+    usersQ.isLoading ||
+    (isEdit && !editLoaded);
+  const loadError = accountsQ.error || busQ.error || usersQ.error || draftQ.error || hoursQ.error;
 
   return (
     <Layout>
       <PageHeader
-        title="New project"
-        subtitle="Define the scope, resources, and planned hours."
+        title={isEdit ? "Edit draft" : "New project"}
+        subtitle={
+          isEdit
+            ? "Revise the scope, resources, and planned hours. Saving updates the draft."
+            : "Define the scope, resources, and planned hours."
+        }
         actions={
           <Button variant="secondary" size="sm" onClick={() => navigate("/projects")}>
             Cancel
@@ -271,6 +347,7 @@ export function ProjectWizardPage() {
               totalWeeks={totalWeeks}
               accounts={accountsQ.data?.accounts ?? []}
               businessUnits={busQ.data?.businessUnits ?? []}
+              lockCode={isEdit}
             />
           )}
           {currentStep === 2 && (
@@ -311,6 +388,14 @@ export function ProjectWizardPage() {
                 disabled={!stepValid(currentStep)}
               >
                 Continue
+              </Button>
+            ) : isEdit ? (
+              <Button
+                onClick={() => editMutation.mutate()}
+                loading={editMutation.isPending}
+                disabled={!stepValid(5) || editMutation.isPending}
+              >
+                Save changes
               </Button>
             ) : (
               <div className="flex items-center gap-2">
@@ -443,18 +528,22 @@ function Step1Basics({
   totalWeeks,
   accounts,
   businessUnits,
+  lockCode = false,
 }: {
   state: WizardState;
   setState: (s: WizardState) => void;
   totalWeeks: number;
   accounts: AdminAccount[];
   businessUnits: AdminBusinessUnit[];
+  lockCode?: boolean;
 }) {
   const activeAccounts = accounts.filter((a) => a.isActive);
   const activeBus = businessUnits.filter((b) => b.isActive);
 
-  // Auto-fill project code from name if user hasn't hand-typed one yet.
+  // Auto-fill project code from name if user hasn't hand-typed one yet. Skipped
+  // when editing — an existing draft's code is fixed.
   useEffect(() => {
+    if (lockCode) return;
     if (!state.projectCode && state.name.length >= 3) {
       const auto =
         state.name
@@ -486,7 +575,8 @@ function Step1Basics({
               setState({ ...state, projectCode: v.toUpperCase().replace(/[^A-Z0-9-]/g, "") })
             }
             placeholder="e.g. BRF-2026"
-            hint="Uppercase letters, digits, and hyphens."
+            disabled={lockCode}
+            hint={lockCode ? "Fixed after creation." : "Uppercase letters, digits, and hyphens."}
             error={
               state.projectCode && !/^[A-Z0-9-]+$/.test(state.projectCode)
                 ? "Only A-Z, 0-9, and hyphens allowed"

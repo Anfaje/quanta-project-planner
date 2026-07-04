@@ -163,6 +163,14 @@ function DraftTable({
                     {d.name}
                   </Link>
                   <div className="text-xs text-gray-400">{d.projectCode}</div>
+                  {d.isOwner && (
+                    <Link
+                      to={`/projects/${d.id}/edit`}
+                      className="text-xs text-indigo-600 hover:text-indigo-700"
+                    >
+                      Edit in planner
+                    </Link>
+                  )}
                 </td>
                 <td className="px-6 py-3 text-gray-600">{d.account.name}</td>
                 <td className="px-6 py-3">

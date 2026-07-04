@@ -165,6 +165,7 @@ export interface ProjectDetail {
     projectCode: string;
     status: ProjectStatus;
     pricingModel: PricingModel;
+    fixedPrice: number | null;
     description: string | null;
     rejectionNote: string | null;
     rejectionAt: string | null;
