@@ -2,7 +2,6 @@ import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { StagingBanner } from "./components/StagingBanner";
 import { LoginPage, MfaVerifyPage } from "./pages/LoginPage";
 import { MfaSetupPage } from "./pages/MfaSetupPage";
 import { SignupPage } from "./pages/SignupPage";
@@ -66,7 +65,6 @@ function PageFallback() {
 export default function App() {
   return (
     <AuthProvider>
-      <StagingBanner />
       <Suspense fallback={<PageFallback />}>
         <Routes>
           {/* ── Public auth routes ── */}
