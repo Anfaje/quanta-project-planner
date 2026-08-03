@@ -107,17 +107,17 @@ jobs:
         run: npm run test:integration
         working-directory: packages/api
 
-  # ─── Deploy to STAGING ──────────────────────────────────────
-  # Every push to main auto-deploys to the staging app (after both
-  # test jobs pass). Production is a separate, deliberate promotion —
-  # see .github/workflows/promote-prod.yml (tag `v*` or manual run).
+  # ─── Deploy ─────────────────────────────────────────────────
+  # Every push to main auto-deploys the API to the live (alpha) app,
+  # after both test jobs pass. Deploys queue in order and are never
+  # cancelled mid-flight.
   deploy:
-    name: Deploy to staging
+    name: Deploy
     needs: [unit, integration]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency:
-      group: api-deploy-staging
+      group: api-deploy-prod
       cancel-in-progress: false
 
     steps:
@@ -129,8 +129,8 @@ jobs:
       # repo secret created via:
       #   fly tokens create deploy -x 999999h
       # then pasted into Settings → Secrets and variables → Actions.
-      - name: Deploy to staging
-        run: flyctl deploy --remote-only --config fly.staging.toml
+      - name: Deploy
+        run: flyctl deploy --remote-only
         working-directory: packages/api
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
