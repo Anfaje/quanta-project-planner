@@ -59,6 +59,8 @@ COPY --from=builder --chown=node-app:node-app /app/dist ./dist
 COPY --from=builder --chown=node-app:node-app /app/node_modules ./node_modules
 COPY --from=builder --chown=node-app:node-app /app/package.json ./package.json
 COPY --from=builder --chown=node-app:node-app /app/prisma ./prisma
+# Release-time migration script (fly.toml release_command).
+COPY --chown=node-app:node-app scripts ./scripts
 
 ENV NODE_ENV=production
 ENV API_PORT=4000

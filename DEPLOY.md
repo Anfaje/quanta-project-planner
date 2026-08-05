@@ -216,7 +216,7 @@ The workflows only run when files under `packages/api/**` or `packages/web/**` c
 | API | ~3 min (unit + integration) | ~90 sec | ~4–5 min |
 | Web | ~1 min (typecheck + vitest + vite build) | ~60 sec | ~2 min |
 
-On the API deploy, Fly runs the release command `npx prisma db push --skip-generate --accept-data-loss` against the attached Postgres to sync the schema **before** the new image goes live. If that fails, the deploy aborts and the previous version keeps serving.
+On the API deploy, Fly runs the release command (`scripts/release.sh`, i.e. `npx prisma migrate deploy` plus a one-time self-baseline for databases that predate the migrations folder) against the attached Postgres to apply pending migrations **before** the new image goes live. If that fails, the deploy aborts and the previous version keeps serving.
 
 **Verify the API:**
 ```
@@ -265,7 +265,7 @@ If login works end-to-end, the deploy is good.
 ## What happens on every subsequent code change
 
 Push to `main`:
-- Touches `packages/api/**` → the **API** workflow runs CI, then deploys `quanta-api` (re-running the `prisma db push` release command).
+- Touches `packages/api/**` → the **API** workflow runs CI, then deploys `quanta-api` (re-running the migration release command).
 - Touches `packages/web/**` → the **Web** workflow runs CI, then deploys `quanta-web`.
 - Touches neither → nothing deploys.
 
@@ -300,7 +300,7 @@ MPG sits behind Fly's proxy + PgBouncer, which **terminate idle connections** �
 Classic symptom of an **app-scoped** token. A deploy token only covers one app; both apps share `FLY_API_TOKEN`, so it must be **org-scoped**. Re-mint with `fly tokens create org <org>` (step 4a) and update the GitHub secret.
 
 ### Deploy succeeds but `/api/health` shows `db: "disconnected"`
-The `prisma db push` release command likely failed. Check logs:
+The release migration (`scripts/release.sh` → `prisma migrate deploy`) likely failed. Check logs:
 ```bash
 fly logs --app quanta-api
 ```
@@ -361,7 +361,6 @@ Then remove the GitHub secret (https://github.com/Anfaje/quanta-project-planner/
 This is the minimum viable deploy. Production work parked for later:
 
 - **Tune the Postgres connection for production load** — set `?connection_limit` on `DATABASE_URL` to match the machine size, and if you scale out connections consider switching the MPG pooler to Transaction mode (add `?pgbouncer=true` so Prisma stops using named prepared statements). MPG itself — HA, backups, failover — is already in place.
-- **Real migrations** — replace the `prisma db push` release command with `prisma migrate deploy` once a `prisma/migrations` history exists (run `npx prisma migrate dev --name init` locally first). `db push` is fine for a test box but won't give you versioned, reviewable schema changes.
 - **Reset-token email + hashing** — wire SMTP so password-reset links are emailed (not returned in the response), and hash reset tokens at rest (see [`SECURITY.md`](SECURITY.md)).
 - **Terraform** — declarative provisioning so all of the above is reproducible from code.
 - **Custom domain + cert**, **staging environment**, **observability** (Sentry, log aggregation), and a **backup/restore** runbook.

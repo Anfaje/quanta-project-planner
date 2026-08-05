@@ -33,22 +33,14 @@ primary_region = "ord"  # Chicago — matches the user's location
 # previous version keeps serving — Fly's standard release-command
 # semantics.
 [deploy]
-  # NOTE: We use 'prisma db push' rather than 'prisma migrate deploy'
-  # because the project doesn't yet have a migrations/ folder. db push
-  # syncs the schema directly from schema.prisma without creating a
-  # migration history — fine for e2e testing on Fly, but should be
-  # replaced with proper migrations BEFORE any production data exists.
-  #
-  # Migration path when you're ready:
-  #   1. Locally: cd packages/api && npx prisma migrate dev --name init
-  #   2. Commit packages/api/prisma/migrations/
-  #   3. Change this line to: npx prisma migrate deploy
-  #   4. Push; the next deploy applies migrations properly with audit trail
-  #
-  # --skip-generate: the client was generated in the Dockerfile builder
-  # --accept-data-loss: required when db push detects destructive changes;
-  #   the warning is for awareness — we don't have prod data yet so empty
-  release_command = "sh -c 'npx prisma db push --skip-generate --accept-data-loss && npx prisma db execute --schema prisma/schema.prisma --file prisma/backfill_business_unit.sql'"
+  # Schema changes ship as committed Prisma migrations
+  # (prisma/migrations/), applied at release time by scripts/release.sh
+  # via `prisma migrate deploy` — versioned, reviewable, and never
+  # destructive. The script also self-baselines a database that predates
+  # the migrations folder (created via `prisma db push`): on P3005 it
+  # marks the init migration as applied and retries. If the release
+  # fails, the deploy aborts and the previous version keeps serving.
+  release_command = "sh scripts/release.sh"
   strategy        = "rolling"
 
 [build]
