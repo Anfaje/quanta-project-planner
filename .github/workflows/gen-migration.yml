@@ -1,0 +1,44 @@
+# TEMPORARY — deleted in the same PR once the migration is generated.
+# This sandbox can't fetch Prisma engines, so the initial migration SQL is
+# generated on a GitHub runner and committed back to this branch.
+name: Generate initial Prisma migration
+
+on:
+  push:
+    branches: [adopt-migrations]
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: ${{ !contains(github.event.head_commit.message, '[generated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Installs prisma CLI; postinstall's `prisma generate` fetches engines.
+      - name: Install API deps
+        run: npm install --no-audit --no-fund
+        working-directory: packages/api
+
+      - name: Generate migration from schema
+        working-directory: packages/api
+        run: |
+          MIG_DIR="prisma/migrations/20260805000000_init"
+          mkdir -p "$MIG_DIR"
+          npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > "$MIG_DIR/migration.sql"
+          printf 'provider = "postgresql"\n' > prisma/migrations/migration_lock.toml
+          wc -l "$MIG_DIR/migration.sql"
+
+      - name: Commit generated files back to branch
+        run: |
+          git config user.name "quanta-ci"
+          git config user.email "ci@users.noreply.github.com"
+          git add packages/api/prisma/migrations
+          git commit -m "Add generated initial migration [generated]"
+          git push
