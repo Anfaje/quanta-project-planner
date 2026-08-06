@@ -117,6 +117,8 @@ export interface ProjectListItem {
   account: AccountLite;
   owningBu: BusinessUnitLite;
   resourceCount: number;
+  /** Planned-hours drift vs the Initial Plan baseline (null = no baseline). */
+  hoursDriftPct?: number | null;
   // Financial fields — present only if the caller can see them
   totalFee?: number;
   totalCost?: number;
@@ -314,6 +316,7 @@ export interface ProjectHealthRow {
   totalActualHours: number;
   eacHours: number;
   overrunPct: number;
+  hoursDriftPct?: number | null;
   totalFee?: number;
   totalCost?: number;
   marginPct?: number;
@@ -459,4 +462,30 @@ export interface InviteCreatedResponse {
   token: string;
   acceptUrl: string;
   expiresAt: string;
+}
+
+/** GET /api/projects/:id/baseline-comparison */
+export interface BaselineComparison {
+  capturedAt: string;
+  baseline: { startDate: string; endDate: string; contingencyPct: number };
+  totals: {
+    baselineHours: number;
+    currentHours: number;
+    hoursDriftPct: number | null;
+    baselineFee?: number;
+    currentFee?: number;
+    baselineCost?: number;
+    currentCost?: number;
+    baselineMarginPct?: number;
+    currentMarginPct?: number;
+  };
+  rows: Array<{
+    userId: string;
+    name: string;
+    projectRole: string;
+    baselineHours: number;
+    currentHours: number;
+    deltaHours: number;
+    change: "added" | "removed" | "kept";
+  }>;
 }

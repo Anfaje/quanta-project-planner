@@ -132,6 +132,22 @@ async function buildProjectHealthSection(user: any) {
     take: 50,
   });
 
+  // Baseline totals for the drift signal (frozen JSON snapshots — cheap).
+  const baselines = await prisma.planBaseline.findMany({
+    where: { projectId: { in: projects.map((p) => p.id) } },
+    select: { projectId: true, snapshot: true },
+  });
+  const baselineHours = new Map(
+    baselines.map((b) => {
+      const snap = b.snapshot as any;
+      const total = (snap.assignments ?? []).reduce(
+        (sum: number, a: any) => sum + (a.plannedHours ?? 0),
+        0
+      );
+      return [b.projectId, total] as const;
+    })
+  );
+
   return projects.map((p) => {
     const ctx = {
       projectId: p.id,
@@ -152,6 +168,11 @@ async function buildProjectHealthSection(user: any) {
     const overrun = fin.totalPlannedHours > 0
       ? round2(((fin.eacHours - fin.totalPlannedHours) / fin.totalPlannedHours) * 100)
       : 0;
+    const base = baselineHours.get(p.id);
+    const hoursDriftPct =
+      base != null && base > 0
+        ? round2(((fin.totalPlannedHours - base) / base) * 100)
+        : null;
 
     return serializeForUser(
       {
@@ -168,6 +189,7 @@ async function buildProjectHealthSection(user: any) {
         totalActualHours: fin.totalActualHours,
         eacHours: fin.eacHours,
         overrunPct: overrun,
+        hoursDriftPct,
         totalFee: fin.totalFee,
         totalCost: fin.totalCost,
         marginPct: fin.marginPct,

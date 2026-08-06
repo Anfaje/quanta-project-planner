@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import { requireAuth, requireRoles } from "../middleware/auth";
 import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema } from "../utils/validation";
 import { logChanges, diffFields } from "../services/auditLog";
+import { captureBaseline } from "../services/planBaseline";
 
 const router = Router();
 
@@ -636,6 +637,30 @@ router.post("/accounts", requireRoles(Role.AA), async (req: Request, res: Respon
 router.put("/accounts/:id/deactivate", requireRoles(Role.AA), async (req: Request, res: Response) => {
   await prisma.account.update({ where: { id: req.params.id }, data: { isActive: false } });
   res.json({ message: "Account deactivated" });
+});
+
+/**
+ * POST /api/admin/backfill-baselines — AA only.
+ * One-off helper: captures an Initial Plan baseline for any non-draft project
+ * that predates the baseline feature. Idempotent — captureBaseline skips
+ * projects that already have one.
+ */
+router.post("/backfill-baselines", requireRoles(Role.AA), async (req: Request, res: Response) => {
+  const projects = await prisma.project.findMany({
+    where: { status: { not: "draft" } },
+    select: { id: true },
+  });
+  let created = 0;
+  for (const p of projects) {
+    const existing = await prisma.planBaseline.findUnique({
+      where: { projectId: p.id },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await captureBaseline(prisma, p.id, req.authUser!.id);
+    created += 1;
+  }
+  res.json({ scanned: projects.length, created });
 });
 
 export default router;

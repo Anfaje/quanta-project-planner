@@ -311,6 +311,81 @@ describe("POST /api/projects", () => {
     expect(own.body.approvalFinancials).toBeUndefined();
   });
 
+  it("baseline drift: comparison reflects plan growth after approval", async () => {
+    const { pm, body } = await basePayload(prisma);
+    const pmAgent = await authenticateAs(app, pm.email);
+    const created = await pmAgent
+      .post("/api/projects")
+      .send({
+        ...body,
+        plannedHours: [{ userId: pm.id, projectWeek: 0, plannedHours: 20 }],
+      })
+      .expect(201);
+    const projectId = created.body.projectId;
+
+    // Approval captures the Initial Plan baseline (20h).
+    const aaAgent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const ap = await aaAgent.post(`/api/projects/${projectId}/approve`);
+    expect(ap.status).toBeLessThan(300);
+
+    // Scope creep: bump the planned hours to 30 after activation.
+    const a = await prisma.resourceAssignment.findFirst({
+      where: { projectId, userId: pm.id },
+    });
+    await prisma.hourEntry.updateMany({
+      where: { assignmentId: a!.id, projectWeek: 0 },
+      data: { plannedHours: 30 },
+    });
+
+    // AA (financial access) sees hours drift + fee/cost/margin deltas.
+    const res = await aaAgent.get(`/api/projects/${projectId}/baseline-comparison`).expect(200);
+    expect(res.body.totals.baselineHours).toBe(20);
+    expect(res.body.totals.currentHours).toBe(30);
+    expect(res.body.totals.hoursDriftPct).toBe(50);
+    expect(res.body.totals.baselineFee).toBeDefined();
+    const row = res.body.rows.find((r: { userId: string }) => r.userId === pm.id);
+    expect(row.change).toBe("kept");
+    expect(row.deltaHours).toBe(10);
+
+    // The PM (no financial visibility) still gets the hours story, no money.
+    const pmRes = await pmAgent.get(`/api/projects/${projectId}/baseline-comparison`).expect(200);
+    expect(pmRes.body.totals.currentHours).toBe(30);
+    expect(pmRes.body.totals.baselineFee).toBeUndefined();
+
+    // The list surfaces the same drift signal.
+    const list = await aaAgent.get("/api/projects").expect(200);
+    const item = list.body.projects.find((x: { id: string }) => x.id === projectId);
+    expect(item.hoursDriftPct).toBe(50);
+  });
+
+  it("baseline drift: 404 when no baseline has been captured", async () => {
+    const { pm, body } = await basePayload(prisma);
+    const agent = await authenticateAs(app, pm.email);
+    const created = await agent.post("/api/projects").send(body).expect(201);
+    await agent.get(`/api/projects/${created.body.projectId}/baseline-comparison`).expect(404);
+  });
+
+  it("admin backfill captures baselines for pre-feature non-draft projects", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    const legacy = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: aa!.id,
+      status: "active",
+      assignments: [{ userId: aa!.id, projectRole: "AA" }],
+    });
+    expect(await prisma.planBaseline.findUnique({ where: { projectId: legacy.id } })).toBeNull();
+
+    const aaAgent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const res = await aaAgent.post("/api/admin/backfill-baselines").expect(200);
+    expect(res.body.created).toBeGreaterThanOrEqual(1);
+    expect(
+      await prisma.planBaseline.findUnique({ where: { projectId: legacy.id } })
+    ).not.toBeNull();
+  });
+
   it("PUT /:id 409s on a non-draft project", async () => {
     const bu = await getDefaultBu(prisma);
     const account = await getDefaultAccount(prisma);

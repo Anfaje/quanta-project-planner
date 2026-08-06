@@ -229,6 +229,12 @@ function ProjectHealthSection({ rows }: { rows: NonNullable<Dashboard["projectHe
                       {r.name}
                     </Link>
                     <div className="text-xs text-gray-400">{r.projectCode}</div>
+                    {r.hoursDriftPct != null && Math.abs(r.hoursDriftPct) >= 5 && (
+                      <Badge tone="amber" className="mt-1">
+                        {r.hoursDriftPct > 0 ? "+" : ""}
+                        {r.hoursDriftPct.toFixed(0)}% vs plan
+                      </Badge>
+                    )}
                   </td>
                   <td className="px-6 py-3 text-gray-600">{r.account.name}</td>
                   <td className="px-6 py-3 text-right text-gray-700 tabular-nums">

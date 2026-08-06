@@ -34,6 +34,7 @@ import {
   TARGET_MARGIN_PCT,
 } from "../services/financialCalc";
 import { logChanges } from "../services/auditLog";
+import type { PlanBaselineSnapshot } from "../services/planBaseline";
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -88,10 +89,32 @@ router.get("/", async (req: Request, res: Response) => {
       account: { select: { id: true, name: true, code: true } },
       owningBu: { select: { id: true, code: true, name: true } },
       shares: { select: { sharedWithBuId: true } },
-      _count: { select: { assignments: true } },
+      pricingModel: true,
+      fixedPrice: true,
+      assignments: {
+        select: {
+          billRate: true,
+          costRate: true,
+          hourEntries: { select: { plannedHours: true, actualHours: true } },
+        },
+      },
     },
     orderBy: [{ status: "asc" }, { startDate: "desc" }],
   });
+
+  // Hours drift vs the Initial Plan baseline — a cheap, non-financial signal
+  // (baseline totals come from the frozen JSON snapshot).
+  const baselines = await prisma.planBaseline.findMany({
+    where: { projectId: { in: projects.map((p) => p.id) } },
+    select: { projectId: true, snapshot: true },
+  });
+  const baselineHoursByProject = new Map(
+    baselines.map((b) => {
+      const snap = b.snapshot as unknown as PlanBaselineSnapshot;
+      const total = (snap.assignments ?? []).reduce((t, a) => t + (a.plannedHours ?? 0), 0);
+      return [b.projectId, total] as const;
+    })
+  );
 
   const rows = projects.map((p) => {
     const ctx = {
@@ -100,6 +123,20 @@ router.get("/", async (req: Request, res: Response) => {
       projectOwningBuId: p.owningBuId,
       projectSharedBuIds: p.shares.map((s) => s.sharedWithBuId),
     };
+    const fin = computeProjectFinancials(
+      p.assignments.map((a) => ({
+        billRate: a.billRate,
+        costRate: a.costRate,
+        entries: a.hourEntries,
+      })),
+      p.contingencyPct,
+      { pricingModel: p.pricingModel, fixedPrice: p.fixedPrice }
+    );
+    const baseHours = baselineHoursByProject.get(p.id);
+    const hoursDriftPct =
+      baseHours != null && baseHours > 0
+        ? Math.round(((fin.totalPlannedHours - baseHours) / baseHours) * 1000) / 10
+        : null;
     return serializeForUser(
       {
         id: p.id,
@@ -111,7 +148,12 @@ router.get("/", async (req: Request, res: Response) => {
         contingencyPct: Number(p.contingencyPct),
         account: p.account,
         owningBu: p.owningBu,
-        resourceCount: p._count.assignments,
+        resourceCount: p.assignments.length,
+        totalPlannedHours: fin.totalPlannedHours,
+        totalActualHours: fin.totalActualHours,
+        totalFee: fin.totalFee,
+        marginPct: fin.marginPct,
+        hoursDriftPct,
       },
       user,
       ctx
@@ -528,6 +570,121 @@ router.post("/", async (req: Request, res: Response) => {
     logger.error({ err }, "Failed to create project");
     res.status(500).json({ error: "Failed to create project" });
   }
+});
+
+/**
+ * GET /api/projects/:id/baseline-comparison
+ * Live plan vs the Initial Plan baseline captured at first activation.
+ * Hours drift is visible to anyone with access to the project; fee, cost, and
+ * margin columns are included only for callers who can view financials.
+ */
+router.get("/:id/baseline-comparison", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+
+  const bl = await prisma.planBaseline.findUnique({ where: { projectId: ctx.id } });
+  if (!bl) {
+    return res.status(404).json({ error: "No baseline captured for this project yet" });
+  }
+  const snap = bl.snapshot as unknown as PlanBaselineSnapshot;
+
+  const project = await prisma.project.findUnique({
+    where: { id: ctx.id },
+    select: {
+      contingencyPct: true,
+      pricingModel: true,
+      fixedPrice: true,
+      assignments: {
+        select: {
+          userId: true,
+          projectRole: true,
+          billRate: true,
+          costRate: true,
+          user: { select: { name: true } },
+          hourEntries: { select: { plannedHours: true, actualHours: true } },
+        },
+      },
+    },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const baselineFin = computeProjectFinancials(
+    snap.assignments.map((a) => ({
+      billRate: a.billRate,
+      costRate: a.costRate,
+      entries: a.weekly.map((w) => ({ plannedHours: w.plannedHours, actualHours: null })),
+    })),
+    snap.contingencyPct,
+    { pricingModel: snap.pricingModel, fixedPrice: snap.fixedPrice }
+  );
+  const currentFin = computeProjectFinancials(
+    project.assignments.map((a) => ({
+      billRate: a.billRate,
+      costRate: a.costRate,
+      entries: a.hourEntries,
+    })),
+    project.contingencyPct,
+    { pricingModel: project.pricingModel, fixedPrice: project.fixedPrice }
+  );
+
+  // Per-person hour rows — union of baseline and current staffing.
+  const baseByUser = new Map(snap.assignments.map((a) => [a.userId, a]));
+  const curByUser = new Map(project.assignments.map((a) => [a.userId, a]));
+  const rows = Array.from(new Set([...baseByUser.keys(), ...curByUser.keys()]))
+    .map((uid) => {
+      const b = baseByUser.get(uid);
+      const c = curByUser.get(uid);
+      const baselineHours = b?.plannedHours ?? 0;
+      const currentHours = c
+        ? c.hourEntries.reduce(
+            (t, e) => t + (e.plannedHours != null ? Number(e.plannedHours) : 0),
+            0
+          )
+        : 0;
+      return {
+        userId: uid,
+        name: c?.user.name ?? b?.name ?? "",
+        projectRole: c?.projectRole ?? b?.projectRole ?? "",
+        baselineHours,
+        currentHours,
+        deltaHours: Math.round((currentHours - baselineHours) * 100) / 100,
+        change: !b ? "added" : !c ? "removed" : "kept",
+      };
+    })
+    .sort((a, z) => Math.abs(z.deltaHours) - Math.abs(a.deltaHours));
+
+  const showFinancials = canViewFinancials(user, ctx.ctx);
+  const driftPct = (base: number, cur: number) =>
+    base > 0 ? Math.round(((cur - base) / base) * 1000) / 10 : null;
+
+  res.json({
+    capturedAt: bl.capturedAt,
+    baseline: {
+      startDate: snap.startDate,
+      endDate: snap.endDate,
+      contingencyPct: snap.contingencyPct,
+    },
+    totals: {
+      baselineHours: baselineFin.totalPlannedHours,
+      currentHours: currentFin.totalPlannedHours,
+      hoursDriftPct: driftPct(baselineFin.totalPlannedHours, currentFin.totalPlannedHours),
+      ...(showFinancials
+        ? {
+            baselineFee: baselineFin.adjustedFee,
+            currentFee: currentFin.adjustedFee,
+            baselineCost: baselineFin.totalCost,
+            currentCost: currentFin.totalCost,
+            baselineMarginPct: baselineFin.marginPct,
+            currentMarginPct: currentFin.marginPct,
+          }
+        : {}),
+    },
+    rows,
+  });
 });
 
 /**
