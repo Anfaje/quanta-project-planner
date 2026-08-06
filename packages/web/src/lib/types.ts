@@ -184,6 +184,16 @@ export interface ProjectDetail {
   };
   assignments: AssignmentRow[];
   financials: ProjectFinancials;
+  /** Present only for callers who can approve this draft: the plan's economics. */
+  approvalFinancials?: {
+    plannedFee?: number;
+    plannedCost?: number;
+    adjustedFee?: number;
+    contingencyPct: number;
+    contingencyAmt?: number;
+    marginPct?: number;
+    belowTarget: boolean;
+  };
   capabilities: {
     canManage: boolean;
     canManagePlan: boolean;

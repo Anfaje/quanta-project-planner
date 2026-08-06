@@ -126,6 +126,40 @@ describe("ProjectDetailPage — draft workflow", () => {
     });
   });
 
+  it("shows the plan's economics to an approver and guards a below-target approval", async () => {
+    h.me = makeMe({ id: "u-bul", roles: ["BUL"] });
+    const d = detail({ capabilities: { canApproveDraft: true } });
+    d.approvalFinancials = {
+      plannedFee: 90000,
+      plannedCost: 65000,
+      adjustedFee: 99000,
+      contingencyPct: 0.1,
+      contingencyAmt: 9000,
+      marginPct: 28.3,
+      belowTarget: true,
+    };
+    mockGet(d);
+    (api.post as any).mockResolvedValue({});
+
+    renderWithProviders(<ProjectDetailPage />, {
+      route: "/projects/p-draft",
+      path: "/projects/:id",
+    });
+
+    // The financial summary renders for the approver, flagged below target.
+    expect(await screen.findByText("28.3%")).toBeInTheDocument();
+    expect(screen.getByText(/Below the 35% target margin/i)).toBeInTheDocument();
+
+    // Approving routes through the guarded confirm ("Approve anyway").
+    await userEvent.click(screen.getByRole("button", { name: /^Approve$/i }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/below the 35% target/i)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: /Approve anyway/i }));
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("/api/projects/p-draft/approve");
+    });
+  });
+
   it("the owner sees the rejection banner and can resubmit", async () => {
     h.me = makeMe({ id: "u-owner", roles: ["PM"] }); // the owner
     mockGet(

@@ -26,6 +26,7 @@ import {
   formatDate,
   statusColorClasses,
 } from "../lib/format";
+import { TARGET_MARGIN_PCT } from "../lib/constants";
 import { HoursGridPanel } from "../components/HoursGridPanel";
 import { BurnChartPanel } from "../components/BurnChartPanel";
 import { FinancialsPanel } from "../components/FinancialsPanel";
@@ -201,6 +202,7 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
   const navigate = useNavigate();
   const p = data.project;
   const caps = data.capabilities;
+  const fin = data.approvalFinancials;
   const isOwner = me.id === p.createdBy.id;
 
   const [approveOpen, setApproveOpen] = useState(false);
@@ -307,6 +309,39 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
             </div>
           </div>
 
+          {caps.canApproveDraft && fin && (
+            <div className="mt-4 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                <div>
+                  <span className="text-gray-500">Planned fee</span>{" "}
+                  <span className="font-medium text-gray-800">{formatMoney(fin.adjustedFee)}</span>
+                  {(fin.contingencyAmt ?? 0) > 0 && (
+                    <span className="text-xs text-gray-400">
+                      {" "}
+                      (incl. {formatPercent(fin.contingencyPct * 100, 0)} contingency)
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <span className="text-gray-500">Planned cost</span>{" "}
+                  <span className="font-medium text-gray-800">{formatMoney(fin.plannedCost)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-500">Planned margin</span>
+                  <Badge tone={fin.belowTarget ? "amber" : "emerald"}>
+                    {formatPercent(fin.marginPct)}
+                  </Badge>
+                </div>
+              </div>
+              {fin.belowTarget && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Below the {TARGET_MARGIN_PCT}% target margin — approval will ask you to
+                  confirm.
+                </p>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="mt-3">
               <Alert tone="rose">{error}</Alert>
@@ -318,8 +353,19 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
       <ConfirmModal
         open={approveOpen}
         title="Approve this draft?"
-        message="This activates the project and commits its planned hours — it will start counting toward cost, revenue, and capacity."
-        confirmLabel="Approve"
+        tone={fin?.belowTarget ? "danger" : "primary"}
+        message={
+          fin?.belowTarget ? (
+            <>
+              Planned margin is <strong>{formatPercent(fin.marginPct)}</strong> — below the{" "}
+              {TARGET_MARGIN_PCT}% target. Approving activates the project and commits its
+              planned hours at this margin.
+            </>
+          ) : (
+            "This activates the project and commits its planned hours — it will start counting toward cost, revenue, and capacity."
+          )
+        }
+        confirmLabel={fin?.belowTarget ? "Approve anyway" : "Approve"}
         onConfirm={() => approveMut.mutate()}
         onCancel={() => setApproveOpen(false)}
         loading={approveMut.isPending}

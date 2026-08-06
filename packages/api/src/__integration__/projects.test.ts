@@ -287,6 +287,30 @@ describe("POST /api/projects", () => {
     expect(he?.plannedHours == null ? null : Number(he.plannedHours)).toBe(10);
   });
 
+  it("exposes approvalFinancials to a draft approver even without financial access", async () => {
+    const { pm, body, bu } = await basePayload(prisma);
+    const pmAgent = await authenticateAs(app, pm.email);
+    const created = await pmAgent.post("/api/projects").send(body).expect(201);
+    const projectId = created.body.projectId;
+
+    // An AA WITHOUT the financialAccess flag: general financials are stripped
+    // for them, but the approval mandate still surfaces the plan's economics.
+    const auditor = await seedUser(prisma, { buId: bu.id, roles: ["AA"], financialAccess: false });
+    const aaAgent = await authenticateAs(app, auditor.email);
+    const res = await aaAgent.get(`/api/projects/${projectId}`).expect(200);
+
+    expect(res.body.capabilities.canApproveDraft).toBe(true);
+    expect(res.body.approvalFinancials).toBeTruthy();
+    expect(typeof res.body.approvalFinancials.marginPct).toBe("number");
+    expect(typeof res.body.approvalFinancials.belowTarget).toBe("boolean");
+    // The general stripping stays intact — approvalFinancials is scoped, not a bypass.
+    expect(res.body.financials.totalFee).toBeUndefined();
+
+    // The PM owner has no approval mandate → no approvalFinancials.
+    const own = await pmAgent.get(`/api/projects/${projectId}`).expect(200);
+    expect(own.body.approvalFinancials).toBeUndefined();
+  });
+
   it("PUT /:id 409s on a non-draft project", async () => {
     const bu = await getDefaultBu(prisma);
     const account = await getDefaultAccount(prisma);

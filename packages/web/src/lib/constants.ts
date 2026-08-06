@@ -18,3 +18,6 @@ export function effectiveCost(baseline: number, personBuCode: string, owningBuCo
 export function isCrossBu(personBuCode: string, owningBuCode: string): boolean {
   return personBuCode !== "" && owningBuCode !== "" && personBuCode !== owningBuCode;
 }
+
+/** Target planned margin (%) — below this a project is at-risk and draft approval warns. */
+export const TARGET_MARGIN_PCT = 35;
