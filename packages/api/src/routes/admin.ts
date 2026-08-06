@@ -4,7 +4,7 @@ import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
 import { requireAuth, requireRoles } from "../middleware/auth";
-import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema } from "../utils/validation";
+import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema, updateMeSchema } from "../utils/validation";
 import { logChanges, diffFields } from "../services/auditLog";
 
 const router = Router();
@@ -118,7 +118,7 @@ router.put("/users/:id/cost-rate", requireRoles(Role.BUL, Role.AA), async (req: 
  * PUT /api/admin/users/:id/roles
  * AA only: update a user's roles, financial flag, managed accounts, BU.
  */
-router.put("/users/:id/roles", requireRoles(Role.AA), async (req: Request, res: Response) => {
+router.put("/users/:id/roles", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
   try {
     const parsed = updateRolesSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -136,6 +136,51 @@ router.put("/users/:id/roles", requireRoles(Role.AA), async (req: Request, res: 
     }
 
     const { roles, financialAccess, managedAccountIds, primaryBuId } = parsed.data;
+
+    const actor = req.authUser!;
+    const actorIsAa = actor.roles.includes(Role.AA);
+
+    // Self-edit protection: nobody strips their own AA role, and non-AA
+    // admins don't change their own roles at all (ask a peer or an AA).
+    if (targetId === actor.id) {
+      if (!actorIsAa) {
+        return res.status(400).json({ error: "You can't change your own roles — ask another admin" });
+      }
+      if (target.roles.includes(Role.AA) && !roles.includes(Role.AA)) {
+        return res
+          .status(400)
+          .json({ error: "You can't remove your own Account Administrator role" });
+      }
+    }
+
+    // BU leads administer their own BU with a ceiling: they can grant up to
+    // BUL (peers) but never AA, can't touch users outside their BU or anyone
+    // holding AA, and the global switches (financial access, BU moves,
+    // managed accounts) remain AA-only.
+    if (!actorIsAa) {
+      if (target.primaryBuId !== actor.primaryBuId) {
+        return res.status(403).json({ error: "You can only edit users in your own business unit" });
+      }
+      if (target.roles.includes(Role.AA)) {
+        return res.status(403).json({ error: "Account Administrators can only be edited by an AA" });
+      }
+      if (roles.includes(Role.AA)) {
+        return res.status(403).json({ error: "Only an AA can grant the Account Administrator role" });
+      }
+      if (financialAccess !== undefined && financialAccess !== target.financialAccess) {
+        return res.status(403).json({ error: "Financial access is managed by an AA" });
+      }
+      if (primaryBuId && primaryBuId !== target.primaryBuId) {
+        return res.status(403).json({ error: "Moving users between business units is managed by an AA" });
+      }
+      if (managedAccountIds !== undefined) {
+        const before = target.managedAccounts.map((mm) => mm.accountId).sort().join(",");
+        const after = [...managedAccountIds].sort().join(",");
+        if (before !== after) {
+          return res.status(403).json({ error: "Managed accounts are assigned by an AA" });
+        }
+      }
+    }
 
     // Build audit trail
     const changes: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
@@ -257,11 +302,58 @@ router.put("/users/:id/deactivate", requireRoles(Role.BUL, Role.AA), async (req:
  * PUT /api/admin/users/:id/reactivate
  */
 router.put("/users/:id/reactivate", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
+  const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  // BUL can only reactivate users in their BU (mirrors deactivate).
+  if (req.authUser!.roles.includes(Role.BUL) && !req.authUser!.roles.includes(Role.AA)) {
+    if (target.primaryBuId !== req.authUser!.primaryBuId) {
+      return res.status(403).json({ error: "Can only reactivate users in your BU" });
+    }
+  }
+
   await prisma.user.update({ where: { id: req.params.id }, data: { isActive: true } });
   await logChanges("User", req.params.id, req.authUser!.id, [
     { field: "is_active", oldValue: "false", newValue: "true" },
   ]);
   res.json({ message: "User reactivated" });
+});
+
+/**
+ * PUT /api/admin/users/:id/profile — BUL (own BU, non-AA targets) or AA.
+ * Edits the planning-facing profile: display name + preferred project-role
+ * labels. System roles live in PUT /users/:id/roles.
+ */
+router.put("/users/:id/profile", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
+  const parsed = updateMeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+  const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  const actor = req.authUser!;
+  if (!actor.roles.includes(Role.AA)) {
+    if (target.primaryBuId !== actor.primaryBuId) {
+      return res.status(403).json({ error: "You can only edit users in your own business unit" });
+    }
+    if (target.roles.includes(Role.AA)) {
+      return res.status(403).json({ error: "Account Administrators can only be edited by an AA" });
+    }
+  }
+
+  const data: { name?: string; projectRoles?: string[] } = {};
+  if (parsed.data.name !== undefined) data.name = parsed.data.name;
+  if (parsed.data.projectRoles !== undefined) data.projectRoles = parsed.data.projectRoles;
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({ error: "Nothing to update" });
+  }
+
+  await prisma.user.update({ where: { id: target.id }, data });
+  await logChanges("User", target.id, actor.id, [
+    { field: "profile", oldValue: null, newValue: "updated by admin" },
+  ]);
+  res.json({ message: "Profile updated" });
 });
 
 /**
@@ -342,6 +434,18 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
   }
 
   const { email, buId, name, projectRole, roles } = parsed.data;
+
+  // BU leads invite into their own BU only, and can grant up to BUL — the
+  // Account Administrator role is granted only by an AA.
+  const inviteActor = req.authUser!;
+  if (!inviteActor.roles.includes(Role.AA)) {
+    if (buId !== inviteActor.primaryBuId) {
+      return res.status(403).json({ error: "You can only invite users into your own business unit" });
+    }
+    if ((roles ?? []).includes(Role.AA)) {
+      return res.status(403).json({ error: "Only an AA can grant the Account Administrator role" });
+    }
+  }
 
   // Basic sanity: domain must be whitelisted (same rule as direct signup).
   const domain = email.split("@")[1]?.toLowerCase();
