@@ -4,7 +4,7 @@ import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
 import { getDashboardSections, canViewFinancials } from "../lib/permissions";
 import { buildProjectAccessFilter } from "../services/projectAccess";
-import { computeProjectFinancials } from "../services/financialCalc";
+import { computeProjectFinancials, TARGET_MARGIN_PCT } from "../services/financialCalc";
 import { serializeForUser } from "../services/financialSerializer";
 
 const router = Router();
@@ -371,7 +371,7 @@ async function buildBuHealthSection(user: any) {
     totalFee += fin.totalFee;
     totalCost += fin.totalCost;
     // "At risk" = projected margin < 35%
-    if (fin.marginPct > 0 && fin.marginPct < 35) atRiskCount += 1;
+    if (fin.marginPct > 0 && fin.marginPct < TARGET_MARGIN_PCT) atRiskCount += 1;
   }
 
   const configMap: Record<string, string> = {};

@@ -31,6 +31,7 @@ import {
   computeBurn,
   countProjectWeeks,
   weekStartDate,
+  TARGET_MARGIN_PCT,
 } from "../services/financialCalc";
 import { logChanges } from "../services/auditLog";
 import {
@@ -318,6 +319,9 @@ router.get("/:id", async (req: Request, res: Response) => {
     select: { capturedAt: true },
   });
 
+  const isApprover =
+    project.status === "draft" && canApproveDraft(user, { owningBuId: project.owningBuId });
+
   res.json({
     project: {
       id: project.id,
@@ -344,14 +348,29 @@ router.get("/:id", async (req: Request, res: Response) => {
     },
     assignments: assignmentRows,
     financials,
+    // Approval guardrail: whoever holds the approval mandate for this draft
+    // sees the plan's economics — planned fee, cost, margin, contingency —
+    // regardless of their financialAccess flag, scoped to this response only
+    // (the general `financials` stripping above is untouched).
+    ...(isApprover
+      ? {
+          approvalFinancials: {
+            plannedFee: projectFin.totalFee,
+            plannedCost: projectFin.totalCost,
+            adjustedFee: projectFin.adjustedFee,
+            contingencyPct: Number(project.contingencyPct),
+            contingencyAmt: projectFin.contingencyAmt,
+            marginPct: projectFin.marginPct,
+            belowTarget: projectFin.marginPct < TARGET_MARGIN_PCT,
+          },
+        }
+      : {}),
     capabilities: {
       canManage: canManageProject(user),
       canManagePlan: canManagePlan(user) && !isPlanLocked(project.status),
       canLockWeeks: canLockWeeks(user),
       isDraft: project.status === "draft",
-      canApproveDraft:
-        project.status === "draft" &&
-        canApproveDraft(user, { owningBuId: project.owningBuId }),
+      canApproveDraft: isApprover,
       canManageReviewers:
         project.status === "draft" &&
         (project.createdById === user.id || user.roles.includes(Role.AA)),

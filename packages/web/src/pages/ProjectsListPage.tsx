@@ -13,6 +13,7 @@ import {
   formatDate,
   statusColorClasses,
 } from "../lib/format";
+import { TARGET_MARGIN_PCT } from "../lib/constants";
 
 /**
  * Projects list.
@@ -162,7 +163,7 @@ export function ProjectsListPage() {
                     </td>
                     <td className="px-6 py-3 text-right">
                       {p.marginPct != null ? (
-                        <Badge tone={p.marginPct >= 35 ? "emerald" : "amber"}>
+                        <Badge tone={p.marginPct >= TARGET_MARGIN_PCT ? "emerald" : "amber"}>
                           {formatPercent(p.marginPct)}
                         </Badge>
                       ) : (

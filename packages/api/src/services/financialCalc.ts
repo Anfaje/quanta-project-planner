@@ -312,3 +312,9 @@ function round2(n: number): number {
 function toUtcDate(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
+
+/**
+ * Target planned margin (%). Projects below this are flagged at-risk on the
+ * dashboard/list and trigger the approval guardrail on drafts.
+ */
+export const TARGET_MARGIN_PCT = 35;
