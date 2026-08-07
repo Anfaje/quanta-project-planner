@@ -489,3 +489,29 @@ export interface BaselineComparison {
     change: "added" | "removed" | "kept";
   }>;
 }
+
+/** GET /api/accounts/summary */
+export interface AccountsSummary {
+  scope: "lifetime" | "ytd" | "rolling12";
+  /** Non-null when the numbers are one BU's slice of each account (BUL view). */
+  slice: { buCode: string } | null;
+  accounts: Array<{
+    id: string;
+    name: string;
+    code: string;
+    projects: number;
+    activeProjects: number;
+    revenue: number;
+    cost: number;
+    profit: number;
+    marginPct: number | null;
+  }>;
+  totals: {
+    revenue: number;
+    cost: number;
+    profit: number;
+    marginPct: number | null;
+    projects: number;
+    activeProjects: number;
+  };
+}

@@ -12,6 +12,7 @@ import meRoutes from "./routes/me";
 import adminRoutes from "./routes/admin";
 import projectRoutes from "./routes/projects";
 import dashboardRoutes from "./routes/dashboard";
+import accountsRoutes from "./routes/accounts";
 import exportRoutes from "./routes/exports";
 import inviteRoutes from "./routes/invites";
 
@@ -148,6 +149,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   app.use("/api/admin", adminRoutes);
   app.use("/api/projects", projectRoutes);
   app.use("/api/dashboard", dashboardRoutes);
+  app.use("/api/accounts", accountsRoutes);
   // exportRoutes defines /projects/:id/export.csv and .pdf — mount at /api so
   // the full path is /api/projects/:id/export.csv (alongside /api/projects).
   app.use("/api", exportRoutes);

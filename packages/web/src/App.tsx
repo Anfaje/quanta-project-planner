@@ -10,6 +10,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ProjectsListPage } from "./pages/ProjectsListPage";
+import { AccountsPage } from "./pages/AccountsPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { Spinner } from "./components/ui";
 
@@ -91,6 +92,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ProjectsListPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounts"
+            element={
+              <ProtectedRoute>
+                <AccountsPage />
               </ProtectedRoute>
             }
           />
