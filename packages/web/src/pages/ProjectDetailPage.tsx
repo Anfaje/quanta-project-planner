@@ -29,6 +29,7 @@ import {
 import { TARGET_MARGIN_PCT } from "../lib/constants";
 import { HoursGridPanel } from "../components/HoursGridPanel";
 import { BurnChartPanel } from "../components/BurnChartPanel";
+import { DriftPanel } from "../components/DriftPanel";
 import { FinancialsPanel } from "../components/FinancialsPanel";
 import { ShareProjectModal } from "../components/ShareProjectModal";
 import { ReviewerShareModal } from "../components/ReviewerShareModal";
@@ -41,13 +42,14 @@ import { ReviewerShareModal } from "../components/ReviewerShareModal";
  * own queries when their tab activates.
  */
 
-type Tab = "overview" | "hours" | "burn" | "financials";
+type Tab = "overview" | "hours" | "burn" | "financials" | "drift";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "hours", label: "Hours grid" },
   { id: "burn", label: "Burn chart" },
   { id: "financials", label: "Financials" },
+  { id: "drift", label: "Baseline drift" },
 ];
 
 export function ProjectDetailPage() {
@@ -92,7 +94,12 @@ export function ProjectDetailPage() {
   // Hide the Financials tab entirely for users without financial access (the
   // API omits fee figures for them) rather than showing an empty-state prompt.
   const hasFinancials = data.financials.totalFee !== undefined;
-  const visibleTabs = hasFinancials ? TABS : TABS.filter((t) => t.id !== "financials");
+  const visibleTabs = TABS.filter(
+    (t) =>
+      (t.id !== "financials" || hasFinancials) &&
+      // Drift only makes sense once an Initial Plan baseline exists.
+      (t.id !== "drift" || p.baseline != null)
+  );
   const exportCsv = () => api.download(`/api/projects/${p.id}/export.csv`);
   const exportPdf = () => api.download(`/api/projects/${p.id}/export.pdf`);
 
@@ -183,6 +190,11 @@ export function ProjectDetailPage() {
         <TabPanel id="burn" active={tab === "burn"}>
           <BurnChartPanel projectId={p.id} />
         </TabPanel>
+        {p.baseline && (
+          <TabPanel id="drift" active={tab === "drift"}>
+            <DriftPanel projectId={p.id} />
+          </TabPanel>
+        )}
         {hasFinancials && (
           <TabPanel id="financials" active={tab === "financials"}>
             <FinancialsPanel detail={data} />

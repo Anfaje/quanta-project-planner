@@ -142,6 +142,12 @@ export function ProjectsListPage() {
                         {p.name}
                       </Link>
                       <div className="text-xs text-gray-400">{p.projectCode}</div>
+                      {p.hoursDriftPct != null && Math.abs(p.hoursDriftPct) >= 5 && (
+                        <Badge tone="amber" className="mt-1">
+                          {p.hoursDriftPct > 0 ? "+" : ""}
+                          {p.hoursDriftPct.toFixed(0)}% vs plan
+                        </Badge>
+                      )}
                     </td>
                     <td className="px-6 py-3 text-gray-600">{p.account.name}</td>
                     <td className="px-6 py-3 text-gray-600">
