@@ -207,3 +207,104 @@ describe("self-protection on deactivate / delete", () => {
     expect(await prisma.user.findUnique({ where: { id: aa!.id } })).not.toBeNull();
   });
 });
+
+describe("BUL as BU-scoped admin", () => {
+  const otherBu = async () =>
+    prisma.businessUnit.upsert({
+      where: { code: "ZZ-OTH-TEST" },
+      update: {},
+      create: { code: "ZZ-OTH-TEST", name: "Other BU" },
+    });
+
+  it("BUL invites into their own BU with roles up to BUL; other BUs and AA are refused", async () => {
+    const bu = await getDefaultBu(prisma);
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const agent = await authenticateAs(app, bul.email);
+
+    const email = `bul-invite-${Math.random().toString(36).slice(2, 6)}@${TEST_DOMAIN}`;
+    await agent
+      .post("/api/admin/users/invite")
+      .send({ email, buId: bu.id, roles: ["PM", "BUL"] })
+      .expect(201);
+    const invited = await prisma.user.findUnique({ where: { email } });
+    expect([...(invited?.roles ?? [])].sort()).toEqual(["BUL", "PM"]);
+
+    const other = await otherBu();
+    const res1 = await agent
+      .post("/api/admin/users/invite")
+      .send({ email: `x-${email}`, buId: other.id });
+    expect(res1.status).toBe(403);
+
+    const res2 = await agent
+      .post("/api/admin/users/invite")
+      .send({ email: `y-${email}`, buId: bu.id, roles: ["AA"] });
+    expect(res2.status).toBe(403);
+  });
+
+  it("BUL edits roles of own-BU users up to BUL; AA grants, AA targets, cross-BU, and global switches are refused", async () => {
+    const bu = await getDefaultBu(prisma);
+    const other = await otherBu();
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const target = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    const outsider = await seedUser(prisma, { buId: other.id, roles: ["IC"] });
+    const agent = await authenticateAs(app, bul.email);
+
+    await agent.put(`/api/admin/users/${target.id}/roles`).send({ roles: ["PM", "BUL"] }).expect(200);
+    const fresh = await prisma.user.findUnique({ where: { id: target.id } });
+    expect([...(fresh?.roles ?? [])].sort()).toEqual(["BUL", "PM"]);
+
+    expect((await agent.put(`/api/admin/users/${target.id}/roles`).send({ roles: ["AA"] })).status).toBe(403);
+    expect((await agent.put(`/api/admin/users/${outsider.id}/roles`).send({ roles: ["PM"] })).status).toBe(403);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    expect((await agent.put(`/api/admin/users/${aa!.id}/roles`).send({ roles: ["IC"] })).status).toBe(403);
+    expect(
+      (await agent.put(`/api/admin/users/${target.id}/roles`).send({ roles: ["PM"], financialAccess: true })).status
+    ).toBe(403);
+    expect(
+      (await agent.put(`/api/admin/users/${target.id}/roles`).send({ roles: ["PM"], primaryBuId: other.id })).status
+    ).toBe(403);
+  });
+
+  it("BUL edits the planning profile (preferred project roles) of own-BU users only", async () => {
+    const bu = await getDefaultBu(prisma);
+    const other = await otherBu();
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const target = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    const outsider = await seedUser(prisma, { buId: other.id, roles: ["IC"] });
+    const agent = await authenticateAs(app, bul.email);
+
+    await agent
+      .put(`/api/admin/users/${target.id}/profile`)
+      .send({ projectRoles: ["iOS Dev", "Backend"] })
+      .expect(200);
+    const fresh = await prisma.user.findUnique({ where: { id: target.id } });
+    expect(fresh?.projectRoles).toEqual(["iOS Dev", "Backend"]);
+
+    expect(
+      (await agent.put(`/api/admin/users/${outsider.id}/profile`).send({ projectRoles: ["QA"] })).status
+    ).toBe(403);
+  });
+
+  it("BUL cannot reactivate users outside their BU (scoping hole closed)", async () => {
+    const bu = await getDefaultBu(prisma);
+    const other = await otherBu();
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const outsider = await seedUser(prisma, { buId: other.id, roles: ["IC"], isActive: false });
+    const agent = await authenticateAs(app, bul.email);
+
+    expect((await agent.put(`/api/admin/users/${outsider.id}/reactivate`)).status).toBe(403);
+    const own = await seedUser(prisma, { buId: bu.id, roles: ["IC"], isActive: false });
+    await agent.put(`/api/admin/users/${own.id}/reactivate`).expect(200);
+  });
+
+  it("nobody strips their own AA role; non-AA admins can't self-edit roles", async () => {
+    const bu = await getDefaultBu(prisma);
+    const aaAgent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    expect((await aaAgent.put(`/api/admin/users/${aa!.id}/roles`).send({ roles: ["BUL"] })).status).toBe(400);
+
+    const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
+    const bulAgent = await authenticateAs(app, bul.email);
+    expect((await bulAgent.put(`/api/admin/users/${bul.id}/roles`).send({ roles: ["BUL", "PM"] })).status).toBe(400);
+  });
+});

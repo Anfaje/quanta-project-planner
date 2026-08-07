@@ -67,7 +67,7 @@ export function AdminConsolePage() {
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-6" />
 
       <TabPanel id="users" active={activeTab === "users"}>
-        <UsersTab canEditAll={isAA} />
+        <UsersTab canEditAll={isAA} buLeadOf={!isAA && isBUL ? (me.primaryBu?.code ?? null) : null} myId={me.id} />
       </TabPanel>
       <TabPanel id="bus" active={activeTab === "bus"}>
         <BusinessUnitsTab canWrite={isAA} />
@@ -86,7 +86,15 @@ export function AdminConsolePage() {
 // Users tab
 // ═══════════════════════════════════════════════════════════════
 
-function UsersTab({ canEditAll }: { canEditAll: boolean }) {
+function UsersTab({
+  canEditAll,
+  buLeadOf,
+  myId,
+}: {
+  canEditAll: boolean;
+  buLeadOf: string | null; // BU code the caller leads (non-AA BUL), else null
+  myId: string;
+}) {
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["admin", "users"],
@@ -100,7 +108,7 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
   const accountsQ = useQuery({
     queryKey: ["admin", "accounts"],
     queryFn: () => api.get<{ accounts: AdminAccount[] }>("/api/admin/accounts"),
-    enabled: canEditAll, // only AA needs account list for AC role assignment
+    enabled: canEditAll || buLeadOf != null, // AA: account assignment; BUL: modal reference data
   });
 
   const [search, setSearch] = useState("");
@@ -188,7 +196,14 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filtered.map((u) => (
+                {filtered.map((u) => {
+                  const rowEditable =
+                    canEditAll ||
+                    (buLeadOf != null &&
+                      u.primaryBu?.code === buLeadOf &&
+                      !u.roles.includes("AA") &&
+                      u.id !== myId);
+                  return (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-6 py-3">
                       <div className="text-sm font-medium text-gray-900">{u.name}</div>
@@ -237,7 +252,7 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
                     </td>
                     <td className="px-6 py-3 text-right">
                       <div className="flex justify-end gap-1">
-                        {canEditAll && (
+                        {rowEditable && (
                           <Button variant="ghost" size="sm" onClick={() => setEditing(u)}>
                             Edit
                           </Button>
@@ -276,7 +291,8 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -289,6 +305,7 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
           businessUnits={busQ.data.businessUnits}
           accounts={accountsQ.data?.accounts ?? []}
           canAssignAccounts={canEditAll}
+          restricted={!canEditAll}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -299,6 +316,8 @@ function UsersTab({ canEditAll }: { canEditAll: boolean }) {
 
       {inviting && busQ.data && (
         <InviteModal
+          lockBuCode={buLeadOf}
+          allowAa={canEditAll}
           businessUnits={busQ.data.businessUnits}
           onClose={() => setInviting(false)}
         />
@@ -362,6 +381,7 @@ function UserEditModal({
   businessUnits,
   accounts,
   canAssignAccounts,
+  restricted = false,
   onClose,
   onSaved,
 }: {
@@ -369,6 +389,8 @@ function UserEditModal({
   businessUnits: AdminBusinessUnit[];
   accounts: AdminAccount[];
   canAssignAccounts: boolean;
+  /** BU-lead mode: role ceiling (no AA) and the AA-only switches hidden. */
+  restricted?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -379,16 +401,29 @@ function UserEditModal({
   const [managedAccountIds, setManagedAccountIds] = useState<string[]>(
     user.managedAccounts.map((a) => a.id)
   );
+  const [projectRolesText, setProjectRolesText] = useState(user.projectRoles.join(", "));
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () => {
-      return api.put(`/api/admin/users/${user.id}/roles`, {
-        roles,
-        financialAccess,
-        primaryBuId: primaryBuId || undefined,
-        managedAccountIds: roles.includes("AC") ? managedAccountIds : [],
-      });
+    mutationFn: async () => {
+      const newProjectRoles = projectRolesText
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (JSON.stringify(newProjectRoles) !== JSON.stringify(user.projectRoles)) {
+        await api.put(`/api/admin/users/${user.id}/profile`, { projectRoles: newProjectRoles });
+      }
+      return api.put(
+        `/api/admin/users/${user.id}/roles`,
+        restricted
+          ? { roles }
+          : {
+              roles,
+              financialAccess,
+              primaryBuId: primaryBuId || undefined,
+              managedAccountIds: roles.includes("AC") ? managedAccountIds : [],
+            }
+      );
     },
     onSuccess: onSaved,
     onError: (err) => {
@@ -417,7 +452,9 @@ function UserEditModal({
       <div className="mb-5">
         <div className="text-sm font-medium text-gray-700 mb-2">Roles</div>
         <div className="grid grid-cols-5 gap-2">
-          {(["IC", "PM", "AC", "BUL", "AA"] as Role[]).map((r) => {
+          {(["IC", "PM", "AC", "BUL", "AA"] as Role[])
+            .filter((r) => !restricted || r !== "AA")
+            .map((r) => {
             const active = roles.includes(r);
             return (
               <button
@@ -441,6 +478,17 @@ function UserEditModal({
       </div>
 
       <div className="mb-5">
+        <FormInput
+          label="Preferred project role(s)"
+          value={projectRolesText}
+          onChange={setProjectRolesText}
+          placeholder="e.g. iOS Dev, Backend"
+          hint="Comma-separated planning labels — these don't change permissions."
+        />
+      </div>
+
+      {!restricted && (
+      <div className="mb-5">
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input
             type="checkbox"
@@ -453,7 +501,9 @@ function UserEditModal({
           Enables platform-wide financial visibility for AAs.
         </div>
       </div>
+      )}
 
+      {!restricted && (
       <div className="mb-5">
         <div className="text-sm font-medium text-gray-700 mb-2">Primary business unit</div>
         <select
@@ -471,6 +521,7 @@ function UserEditModal({
             ))}
         </select>
       </div>
+      )}
 
       {roles.includes("AC") && canAssignAccounts && (
         <div className="mb-5">
@@ -528,14 +579,25 @@ function UserEditModal({
 
 function InviteModal({
   businessUnits,
+  lockBuCode = null,
+  allowAa = true,
   onClose,
 }: {
   businessUnits: AdminBusinessUnit[];
+  /** BU-lead mode: invites are locked to this BU code. */
+  lockBuCode?: string | null;
+  /** Whether the AA role may be granted (AA callers only). */
+  allowAa?: boolean;
   onClose: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [buId, setBuId] = useState(businessUnits.find((b) => b.isActive)?.id ?? "");
+  const lockedBuId = lockBuCode
+    ? businessUnits.find((b) => b.code === lockBuCode)?.id ?? ""
+    : null;
+  const [buId, setBuId] = useState(
+    lockedBuId ?? (businessUnits.find((b) => b.isActive)?.id ?? "")
+  );
   const [projectRole, setProjectRole] = useState("");
   const [roles, setRoles] = useState<Role[]>(["IC"]);
   const [error, setError] = useState<string | null>(null);
@@ -589,6 +651,7 @@ function InviteModal({
               Business unit *
             </label>
             <select
+          disabled={lockedBuId != null}
               value={buId}
               onChange={(e) => setBuId(e.target.value)}
               className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50"
@@ -607,7 +670,9 @@ function InviteModal({
               Role *
             </label>
             <div className="grid grid-cols-5 gap-2">
-              {(["IC", "PM", "AC", "BUL", "AA"] as Role[]).map((r) => {
+              {(["IC", "PM", "AC", "BUL", "AA"] as Role[])
+            .filter((r) => allowAa || r !== "AA")
+            .map((r) => {
                 const active = roles.includes(r);
                 return (
                   <button
