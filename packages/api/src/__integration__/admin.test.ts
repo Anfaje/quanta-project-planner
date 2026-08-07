@@ -89,7 +89,7 @@ describe("PUT /api/admin/users/:id/roles", () => {
     expect(audit?.newValue).toContain("PM");
   });
 
-  it("BUL cannot update roles (only AA can)", async () => {
+  it("BUL can update roles of users in their own BU (up to BUL, never AA)", async () => {
     const bu = await getDefaultBu(prisma);
     const bul = await seedUser(prisma, { buId: bu.id, roles: ["BUL"] });
     const target = await seedUser(prisma, { buId: bu.id });
@@ -98,6 +98,15 @@ describe("PUT /api/admin/users/:id/roles", () => {
     await agent
       .put(`/api/admin/users/${target.id}/roles`)
       .send({ roles: ["IC", "PM"] })
+      .expect(200);
+
+    const fresh = await prisma.user.findUnique({ where: { id: target.id } });
+    expect([...(fresh?.roles ?? [])].sort()).toEqual(["IC", "PM"]);
+
+    // The ceiling still holds: granting AA is refused.
+    await agent
+      .put(`/api/admin/users/${target.id}/roles`)
+      .send({ roles: ["AA"] })
       .expect(403);
   });
 

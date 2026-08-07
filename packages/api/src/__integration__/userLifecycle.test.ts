@@ -227,7 +227,7 @@ describe("BUL as BU-scoped admin", () => {
       .send({ email, buId: bu.id, roles: ["PM", "BUL"] })
       .expect(201);
     const invited = await prisma.user.findUnique({ where: { email } });
-    expect(invited?.roles).toEqual(["PM", "BUL"]);
+    expect([...(invited?.roles ?? [])].sort()).toEqual(["BUL", "PM"]);
 
     const other = await otherBu();
     const res1 = await agent
@@ -251,7 +251,7 @@ describe("BUL as BU-scoped admin", () => {
 
     await agent.put(`/api/admin/users/${target.id}/roles`).send({ roles: ["PM", "BUL"] }).expect(200);
     const fresh = await prisma.user.findUnique({ where: { id: target.id } });
-    expect(fresh?.roles).toEqual(["PM", "BUL"]);
+    expect([...(fresh?.roles ?? [])].sort()).toEqual(["BUL", "PM"]);
 
     expect((await agent.put(`/api/admin/users/${target.id}/roles`).send({ roles: ["AA"] })).status).toBe(403);
     expect((await agent.put(`/api/admin/users/${outsider.id}/roles`).send({ roles: ["PM"] })).status).toBe(403);
