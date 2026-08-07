@@ -27,6 +27,11 @@ const NAV_ITEMS: NavItem[] = [
     to: "/projects/drafts",
     show: (roles) => roles.some((r) => ["PM", "BUL", "AC", "AA"].includes(r)),
   },
+  {
+    label: "Accounts",
+    to: "/accounts",
+    show: (roles) => roles.some((r) => ["BUL", "AC", "AA"].includes(r)),
+  },
   { label: "Admin", to: "/admin", show: (roles) => roles.includes("BUL") || roles.includes("AA") },
 ];
 
