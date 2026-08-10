@@ -19,6 +19,8 @@ import { formatHours, formatDate } from "../lib/format";
 
 interface Props {
   projectId: string;
+  /** Review-only surface: hide all editing (hours are logged on the Dashboard). */
+  readOnly?: boolean;
 }
 
 type PendingCell = {
@@ -41,7 +43,7 @@ type ImportReport = {
 // We keep a pending-edits map keyed by "assignmentId|week|field" so multiple
 // edits to the same cell accumulate cleanly and flush together.
 
-export function HoursGridPanel({ projectId }: Props) {
+export function HoursGridPanel({ projectId, readOnly = false }: Props) {
   const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["project", projectId, "hours"],
@@ -194,7 +196,12 @@ export function HoursGridPanel({ projectId }: Props) {
     return <Alert tone="rose">Couldn&apos;t load hours grid.</Alert>;
   }
 
-  const { weeks, assignments, capabilities } = data;
+  const { weeks, assignments } = data;
+  // Read-only mode (the project page for pure ICs): the grid is a review
+  // surface — hours are logged from the Dashboard's My hours section.
+  const capabilities = readOnly
+    ? { canEditOwnActuals: false, canManagePlan: false, canLockWeeks: false }
+    : data.capabilities;
   const canEdit = capabilities.canEditOwnActuals || capabilities.canManagePlan;
 
   return (
@@ -210,6 +217,11 @@ export function HoursGridPanel({ projectId }: Props) {
             </span>
           )}
         </div>
+        {readOnly && (
+          <div className="text-xs text-gray-400">
+            Read-only — log your hours from the Dashboard&rsquo;s My hours section
+          </div>
+        )}
         {canEdit && (
           <div className="flex gap-2">
             {capabilities.canManagePlan && (

@@ -185,7 +185,10 @@ export function ProjectDetailPage() {
           <OverviewTab data={data} />
         </TabPanel>
         <TabPanel id="hours" active={tab === "hours"}>
-          <HoursGridPanel projectId={p.id} />
+          <HoursGridPanel
+            projectId={p.id}
+            readOnly={!me.roles.some((r) => ["PM", "BUL", "AC", "AA"].includes(r))}
+          />
         </TabPanel>
         <TabPanel id="burn" active={tab === "burn"}>
           <BurnChartPanel projectId={p.id} />
