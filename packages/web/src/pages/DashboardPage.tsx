@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { HoursGridPanel } from "../components/HoursGridPanel";
 import { Link } from "react-router-dom";
 import {
   LineChart,
@@ -98,6 +100,15 @@ export function DashboardPage() {
 // ═══════════════════════════════════════════════════════════════
 
 function MyHoursSection({ rows }: { rows: NonNullable<Dashboard["myHours"]> }) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   if (rows.length === 0) {
     return (
       <Card>
@@ -129,11 +140,21 @@ function MyHoursSection({ rows }: { rows: NonNullable<Dashboard["myHours"]> }) {
               ? Math.min(100, ((r.currentWeekActual ?? 0) / r.currentWeekPlanned) * 100)
               : 0;
           return (
-            <Link
-              key={r.projectId}
-              to={`/projects/${r.projectId}`}
-              className="flex items-center px-6 py-4 hover:bg-gray-50 transition-colors"
-            >
+            <div key={r.projectId}>
+              <button
+                type="button"
+                onClick={() => toggle(r.projectId)}
+                aria-expanded={open.has(r.projectId)}
+                className="w-full flex items-center px-6 py-4 hover:bg-gray-50 transition-colors text-left"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`mr-3 text-[10px] text-gray-400 transition-transform ${
+                    open.has(r.projectId) ? "rotate-90" : ""
+                  }`}
+                >
+                  ▶
+                </span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <div className="text-sm font-semibold text-gray-900 truncate">{r.projectName}</div>
@@ -164,7 +185,21 @@ function MyHoursSection({ rows }: { rows: NonNullable<Dashboard["myHours"]> }) {
                 </div>
                 {r.currentWeekLocked && <Badge tone="gray">Locked</Badge>}
               </div>
-            </Link>
+              </button>
+              {open.has(r.projectId) && (
+                <div className="px-6 pb-5 pt-1 border-t border-gray-50 bg-gray-50/40">
+                  <div className="flex justify-end my-2">
+                    <Link
+                      to={`/projects/${r.projectId}`}
+                      className="text-xs text-indigo-600 hover:text-indigo-700"
+                    >
+                      Open project →
+                    </Link>
+                  </div>
+                  <HoursGridPanel projectId={r.projectId} />
+                </div>
+              )}
+            </div>
           );
         })}
       </div>

@@ -143,3 +143,17 @@ describe("HoursGridPanel", () => {
     });
   });
 });
+
+describe("read-only mode", () => {
+  it("suppresses all editing affordances and points at the Dashboard", async () => {
+    (api.get as ReturnType<typeof vi.fn>).mockResolvedValue(baseGrid);
+    renderWithProviders(<HoursGridPanel projectId="p1" readOnly />);
+
+    expect(await screen.findByText(/Read-only — log your hours from the Dashboard/i)).toBeInTheDocument();
+    // Full capabilities came back from the API, but readOnly overrides them.
+    expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /import csv/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+});

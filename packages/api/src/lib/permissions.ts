@@ -166,7 +166,9 @@ export function getDashboardSections(user: AuthUser): string[] {
   if (user.roles.includes(Role.AC)) sections.push("account_overview");
   if (user.roles.includes(Role.AA)) sections.push("platform_admin");
   if (user.roles.includes(Role.PM)) sections.push("project_health");
-  if (user.roles.includes(Role.IC)) sections.push("my_hours");
+  // Everyone logs their own hours from the dashboard, so the section shows
+  // for all roles (empty state when the caller has no assignments).
+  sections.push("my_hours");
   return sections;
 }
 
