@@ -280,8 +280,8 @@ describe("getDashboardSections", () => {
       .toEqual(["account_overview", "project_health", "my_hours"]);
   });
 
-  it("AA alone: platform_admin only", () => {
-    expect(getDashboardSections(makeUser({ roles: [Role.AA] }))).toEqual(["platform_admin"]);
+  it("AA alone: platform_admin plus my_hours (everyone logs from the dashboard)", () => {
+    expect(getDashboardSections(makeUser({ roles: [Role.AA] }))).toEqual(["platform_admin", "my_hours"]);
   });
 
   it("AA+IC: platform_admin, my_hours", () => {
