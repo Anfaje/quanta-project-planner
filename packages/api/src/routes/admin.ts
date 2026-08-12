@@ -448,15 +448,10 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
     }
   }
 
-  // Basic sanity: domain must be whitelisted (same rule as direct signup).
-  const domain = email.split("@")[1]?.toLowerCase();
-  const allowed = await prisma.domainWhitelist.findMany({ select: { domain: true } });
-  if (!allowed.some((d) => d.domain === domain)) {
-    return res.status(403).json({
-      error: "Email domain not authorised",
-      allowedDomains: allowed.map((d) => d.domain),
-    });
-  }
+  // Deliberately NO domain-whitelist check here: the whitelist gates
+  // unsolicited self-signup only. An explicit invitation from an admin IS the
+  // authorization, so external addresses (partners, contractors, other
+  // entities) can be invited. The UI shows a foreign-domain note pre-submit.
 
   // Block re-inviting a real account (active or deactivated). A pending invite
   // — the inactive, password-less row created below — may be re-invited; that
@@ -541,7 +536,9 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
 /**
  * GET /api/admin/domains
  */
-router.get("/domains", requireRoles(Role.AA), async (_req: Request, res: Response) => {
+// Readable by BUL too — the invite modal uses the list to flag foreign-domain
+// invitations (mutations below remain AA-only).
+router.get("/domains", requireRoles(Role.BUL, Role.AA), async (_req: Request, res: Response) => {
   const domains = await prisma.domainWhitelist.findMany({
     orderBy: { domain: "asc" },
     include: { addedByUser: { select: { name: true } } },
