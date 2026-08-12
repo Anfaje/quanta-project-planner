@@ -83,6 +83,7 @@ function detail(opts: {
       canLockWeeks: false,
       isDraft: true,
       canApproveDraft: false,
+      canViewBilling: false,
       canManageReviewers: false,
       ...(opts.capabilities ?? {}),
     },
