@@ -222,3 +222,28 @@ describe("POST /api/admin/users/invite (roles)", () => {
     expect(invite?.roles).toEqual(["IC"]);
   });
 });
+
+describe("invitations bypass the domain whitelist", () => {
+  it("invites a foreign-domain address and the invitee can accept", async () => {
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const bu = await getDefaultBu(prisma);
+    const email = `ext-${Math.random().toString(36).slice(2, 6)}@partner-foreign.example`;
+
+    const res = await agent
+      .post("/api/admin/users/invite")
+      .send({ email, buId: bu.id, name: "Foreign Friend" })
+      .expect(201);
+
+    // Pending user exists despite the domain not being whitelisted...
+    const pending = await prisma.user.findUnique({ where: { email } });
+    expect(pending?.isActive).toBe(false);
+
+    // ...and accepting works end-to-end (accept never re-checks the whitelist).
+    await request(app)
+      .post(`/api/invites/${res.body.token}/accept`)
+      .send({ name: "Foreign Friend", password: "set-my-password-1" })
+      .expect(201);
+    const active = await prisma.user.findUnique({ where: { email } });
+    expect(active?.isActive).toBe(true);
+  });
+});

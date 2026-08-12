@@ -598,6 +598,17 @@ function InviteModal({
   const [buId, setBuId] = useState(
     lockedBuId ?? (businessUnits.find((b) => b.isActive)?.id ?? "")
   );
+
+  // Whitelist is only about self-signup; an invitation authorizes any address.
+  // We still flag foreign domains so a typo'd or external invite is deliberate.
+  const domainsQ = useQuery({
+    queryKey: ["admin", "domains"],
+    queryFn: () => api.get<{ domains: Array<{ domain: string }> }>("/api/admin/domains"),
+  });
+  const whitelisted = (domainsQ.data?.domains ?? []).map((d) => d.domain.toLowerCase());
+  const emailDomain = email.includes("@") ? (email.split("@")[1] ?? "").trim().toLowerCase() : "";
+  const foreignDomain =
+    emailDomain.length > 0 && whitelisted.length > 0 && !whitelisted.includes(emailDomain);
   const [projectRole, setProjectRole] = useState("");
   const [roles, setRoles] = useState<Role[]>(["IC"]);
   const [error, setError] = useState<string | null>(null);
@@ -645,6 +656,13 @@ function InviteModal({
             </div>
           )}
           <FormInput label="Email *" type="email" value={email} onChange={setEmail} autoFocus />
+          {foreignDomain && (
+            <p className="mt-1.5 text-xs text-amber-600">
+              {emailDomain} isn&rsquo;t one of the self-signup domains — this invitation goes to
+              an external address. That&rsquo;s allowed: the invitation itself is the
+              authorization.
+            </p>
+          )}
           <FormInput label="Name" value={name} onChange={setName} placeholder="Optional pre-fill" />
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
