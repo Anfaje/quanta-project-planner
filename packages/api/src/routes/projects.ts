@@ -14,6 +14,7 @@ import {
   canManagePlan,
   canManageProject,
   canViewFinancials,
+  canViewBillRates,
   isPlanLocked,
 } from "../lib/permissions";
 import {
@@ -413,6 +414,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       canLockWeeks: canLockWeeks(user),
       isDraft: project.status === "draft",
       canApproveDraft: isApprover,
+      canViewBilling: canViewBillRates(user),
       canManageReviewers:
         project.status === "draft" &&
         (project.createdById === user.id || user.roles.includes(Role.AA)),
@@ -684,6 +686,143 @@ router.get("/:id/baseline-comparison", async (req: Request, res: Response) => {
         : {}),
     },
     rows,
+  });
+});
+
+/**
+ * GET /api/projects/:id/billing
+ * The fee-side offer schedule: planned hours × bill rates across the
+ * timeline, weekly and monthly, plus the team's rates — the numbers a PM or
+ * AC lifts into a contract offer for the client.
+ *
+ * Gated on bill-rate visibility (canViewBillRates), NOT full financial
+ * access: everything here derives from bill rates and planned hours, which
+ * those callers already see. Deliberately contains no cost, margin, or
+ * profit figures.
+ */
+router.get("/:id/billing", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  if (!canViewBillRates(user)) {
+    return res.status(403).json({ error: "Bill-rate visibility is required for the billing schedule" });
+  }
+  const ctx = await loadProjectContext(prisma, req.params.id);
+  if (!ctx) return res.status(404).json({ error: "Project not found" });
+  if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
+    return res.status(403).json({ error: "No access to this project" });
+  }
+
+  const project = await prisma.project.findUnique({
+    where: { id: ctx.id },
+    select: {
+      pricingModel: true,
+      fixedPrice: true,
+      contingencyPct: true,
+      startDate: true,
+      endDate: true,
+      assignments: {
+        select: {
+          userId: true,
+          projectRole: true,
+          billRate: true,
+          user: { select: { name: true } },
+          hourEntries: { select: { projectWeek: true, weekStartDate: true, plannedHours: true } },
+        },
+      },
+    },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+
+  const isFixed = project.pricingModel === "fixed_price";
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+
+  const weekMap = new Map<number, { hours: number; fee: number; weekStartDate: Date }>();
+  const monthMap = new Map<string, { hours: number; fee: number }>();
+
+  const team = project.assignments
+    .map((a) => {
+      const rate = a.billRate != null ? Number(a.billRate) : null;
+      let hours = 0;
+      for (const e of a.hourEntries) {
+        const planned = e.plannedHours != null ? Number(e.plannedHours) : 0;
+        if (planned <= 0) continue;
+        hours += planned;
+        const fee = rate != null ? planned * rate : 0;
+        const w = weekMap.get(e.projectWeek) ?? { hours: 0, fee: 0, weekStartDate: e.weekStartDate };
+        w.hours += planned;
+        w.fee += fee;
+        weekMap.set(e.projectWeek, w);
+        const d = new Date(e.weekStartDate);
+        const mk = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+        const m = monthMap.get(mk) ?? { hours: 0, fee: 0 };
+        m.hours += planned;
+        m.fee += fee;
+        monthMap.set(mk, m);
+      }
+      return {
+        userId: a.userId,
+        name: a.user.name,
+        projectRole: a.projectRole,
+        billRate: rate,
+        totalHours: r2(hours),
+        totalFee: isFixed || rate == null ? null : r2(hours * rate),
+      };
+    })
+    .sort((x, y) => (y.totalFee ?? 0) - (x.totalFee ?? 0) || y.totalHours - x.totalHours);
+
+  const weekly = Array.from(weekMap.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([week, w]) => ({
+      week,
+      weekStartDate: w.weekStartDate,
+      hours: r2(w.hours),
+      fee: isFixed ? null : r2(w.fee),
+      blendedRate: isFixed || w.hours === 0 ? null : r2(w.fee / w.hours),
+    }));
+  const monthly = Array.from(monthMap.entries())
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([month, m]) => ({
+      month,
+      hours: r2(m.hours),
+      fee: isFixed ? null : r2(m.fee),
+      blendedRate: isFixed || m.hours === 0 ? null : r2(m.fee / m.hours),
+    }));
+
+  const totalHours = r2(weekly.reduce((t, w) => t + w.hours, 0));
+  const totalFee = isFixed ? null : r2(weekly.reduce((t, w) => t + (w.fee ?? 0), 0));
+  const contingencyPct = Number(project.contingencyPct);
+  const contingencyAmt = totalFee == null ? null : r2(totalFee * contingencyPct);
+  const fixedPrice = project.fixedPrice != null ? Number(project.fixedPrice) : null;
+
+  res.json({
+    pricingModel: project.pricingModel,
+    fixedPrice,
+    contingencyPct,
+    startDate: project.startDate,
+    endDate: project.endDate,
+    team,
+    weekly,
+    monthly,
+    totals: {
+      hours: totalHours,
+      fee: totalFee,
+      contingencyAmt,
+      // The headline number for an offer: T&M fee + contingency, or the contract value.
+      offerTotal: isFixed
+        ? fixedPrice
+        : totalFee != null && contingencyAmt != null
+          ? r2(totalFee + contingencyAmt)
+          : null,
+      blendedRate:
+        totalHours > 0
+          ? isFixed
+            ? fixedPrice != null
+              ? r2(fixedPrice / totalHours)
+              : null
+            : totalFee != null
+              ? r2(totalFee / totalHours)
+              : null
+          : null,
+    },
   });
 });
 

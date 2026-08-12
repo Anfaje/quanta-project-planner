@@ -202,6 +202,7 @@ export interface ProjectDetail {
     canLockWeeks: boolean;
     isDraft: boolean;
     canApproveDraft: boolean;
+    canViewBilling: boolean;
     canManageReviewers: boolean;
   };
 }
@@ -513,5 +514,37 @@ export interface AccountsSummary {
     marginPct: number | null;
     projects: number;
     activeProjects: number;
+  };
+}
+
+/** GET /api/projects/:id/billing — fee-side offer schedule (no cost/margin). */
+export interface BillingSchedule {
+  pricingModel: PricingModel;
+  fixedPrice: number | null;
+  contingencyPct: number;
+  startDate: string;
+  endDate: string;
+  team: Array<{
+    userId: string;
+    name: string;
+    projectRole: string;
+    billRate: number | null;
+    totalHours: number;
+    totalFee: number | null;
+  }>;
+  weekly: Array<{
+    week: number;
+    weekStartDate: string;
+    hours: number;
+    fee: number | null;
+    blendedRate: number | null;
+  }>;
+  monthly: Array<{ month: string; hours: number; fee: number | null; blendedRate: number | null }>;
+  totals: {
+    hours: number;
+    fee: number | null;
+    contingencyAmt: number | null;
+    offerTotal: number | null;
+    blendedRate: number | null;
   };
 }

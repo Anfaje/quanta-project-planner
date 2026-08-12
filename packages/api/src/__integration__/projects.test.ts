@@ -386,6 +386,82 @@ describe("POST /api/projects", () => {
     ).not.toBeNull();
   });
 
+  it("billing schedule: fee-side offer numbers for a PM, weekly and monthly", async () => {
+    const { pm, body } = await basePayload(prisma);
+    const agent = await authenticateAs(app, pm.email);
+    const created = await agent
+      .post("/api/projects")
+      .send({
+        ...body,
+        contingencyPct: 0.15,
+        assignments: [{ userId: pm.id, projectRole: "PM", billRate: 200, costRate: 100 }],
+        plannedHours: [
+          { userId: pm.id, projectWeek: 0, plannedHours: 10 },
+          { userId: pm.id, projectWeek: 1, plannedHours: 20 },
+        ],
+      })
+      .expect(201);
+    const projectId = created.body.projectId;
+
+    const res = await agent.get(`/api/projects/${projectId}/billing`).expect(200);
+    expect(res.body.totals.hours).toBe(30);
+    expect(res.body.totals.fee).toBe(6000);
+    expect(res.body.totals.contingencyAmt).toBe(900);
+    expect(res.body.totals.offerTotal).toBe(6900);
+    expect(res.body.totals.blendedRate).toBe(200);
+    expect(res.body.weekly).toHaveLength(2);
+    expect(res.body.weekly[0]).toMatchObject({ week: 0, hours: 10, fee: 2000, blendedRate: 200 });
+    expect(res.body.weekly[1]).toMatchObject({ week: 1, hours: 20, fee: 4000 });
+    expect(res.body.monthly.reduce((t: number, m: { hours: number }) => t + m.hours, 0)).toBe(30);
+    expect(res.body.monthly.reduce((t: number, m: { fee: number | null }) => t + (m.fee ?? 0), 0)).toBe(6000);
+    expect(res.body.team[0]).toMatchObject({ billRate: 200, totalHours: 30, totalFee: 6000 });
+
+    // Fee-side only by design: nothing cost- or margin-shaped in the payload.
+    expect(JSON.stringify(res.body)).not.toMatch(/cost/i);
+    expect(JSON.stringify(res.body)).not.toMatch(/margin/i);
+
+    // The detail advertises the tab.
+    const detail = await agent.get(`/api/projects/${projectId}`).expect(200);
+    expect(detail.body.capabilities.canViewBilling).toBe(true);
+  });
+
+  it("billing schedule: fixed price carries hours per period, contract as the offer", async () => {
+    const { pm, body } = await basePayload(prisma);
+    const agent = await authenticateAs(app, pm.email);
+    const created = await agent
+      .post("/api/projects")
+      .send({
+        ...body,
+        pricingModel: "fixed_price",
+        fixedPrice: 9000,
+        assignments: [{ userId: pm.id, projectRole: "PM", costRate: 100 }],
+        plannedHours: [
+          { userId: pm.id, projectWeek: 0, plannedHours: 10 },
+          { userId: pm.id, projectWeek: 1, plannedHours: 20 },
+        ],
+      })
+      .expect(201);
+
+    const res = await agent
+      .get(`/api/projects/${created.body.projectId}/billing`)
+      .expect(200);
+    expect(res.body.totals.hours).toBe(30);
+    expect(res.body.totals.fee).toBeNull();
+    expect(res.body.totals.offerTotal).toBe(9000);
+    expect(res.body.totals.blendedRate).toBe(300); // implied: 9000 / 30h
+    expect(res.body.weekly[0].fee).toBeNull();
+  });
+
+  it("billing schedule: 403 without bill-rate visibility", async () => {
+    const { pm, body, bu } = await basePayload(prisma);
+    const agent = await authenticateAs(app, pm.email);
+    const created = await agent.post("/api/projects").send(body).expect(201);
+
+    const ic = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    const icAgent = await authenticateAs(app, ic.email);
+    await icAgent.get(`/api/projects/${created.body.projectId}/billing`).expect(403);
+  });
+
   it("PUT /:id 409s on a non-draft project", async () => {
     const bu = await getDefaultBu(prisma);
     const account = await getDefaultAccount(prisma);

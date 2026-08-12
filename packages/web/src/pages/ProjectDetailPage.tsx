@@ -30,6 +30,7 @@ import { TARGET_MARGIN_PCT } from "../lib/constants";
 import { HoursGridPanel } from "../components/HoursGridPanel";
 import { BurnChartPanel } from "../components/BurnChartPanel";
 import { DriftPanel } from "../components/DriftPanel";
+import { BillingPanel } from "../components/BillingPanel";
 import { FinancialsPanel } from "../components/FinancialsPanel";
 import { ShareProjectModal } from "../components/ShareProjectModal";
 import { ReviewerShareModal } from "../components/ReviewerShareModal";
@@ -42,12 +43,13 @@ import { ReviewerShareModal } from "../components/ReviewerShareModal";
  * own queries when their tab activates.
  */
 
-type Tab = "overview" | "hours" | "burn" | "financials" | "drift";
+type Tab = "overview" | "hours" | "burn" | "billing" | "financials" | "drift";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "hours", label: "Hours grid" },
   { id: "burn", label: "Burn chart" },
+  { id: "billing", label: "Billing" },
   { id: "financials", label: "Financials" },
   { id: "drift", label: "Baseline drift" },
 ];
@@ -97,6 +99,8 @@ export function ProjectDetailPage() {
   const visibleTabs = TABS.filter(
     (t) =>
       (t.id !== "financials" || hasFinancials) &&
+      // Billing (the offer schedule) requires bill-rate visibility.
+      (t.id !== "billing" || data.capabilities.canViewBilling) &&
       // Drift only makes sense once an Initial Plan baseline exists.
       (t.id !== "drift" || p.baseline != null)
   );
@@ -193,6 +197,11 @@ export function ProjectDetailPage() {
         <TabPanel id="burn" active={tab === "burn"}>
           <BurnChartPanel projectId={p.id} />
         </TabPanel>
+        {data.capabilities.canViewBilling && (
+          <TabPanel id="billing" active={tab === "billing"}>
+            <BillingPanel projectId={p.id} />
+          </TabPanel>
+        )}
         {p.baseline && (
           <TabPanel id="drift" active={tab === "drift"}>
             <DriftPanel projectId={p.id} />
