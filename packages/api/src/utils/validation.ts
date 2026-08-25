@@ -102,6 +102,7 @@ export const createProjectSchema = z
     endDate: dateStringSchema,
     contingencyPct: z.number().min(0).max(1).default(0.15),
     pricingModel: z.enum(["time_and_materials", "fixed_price"]).default("time_and_materials"),
+    currency: z.enum(["USD", "GBP", "DKK", "EUR", "CHF", "CAD"]).default("USD"),
     fixedPrice: z.number().min(0).max(1_000_000_000).nullable().optional(),
     description: z.string().max(2000).optional(),
     assignments: z.array(wizardAssignmentSchema).min(1, "At least one resource is required"),

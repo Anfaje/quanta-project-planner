@@ -29,6 +29,7 @@ export function BillingPanel({ projectId }: { projectId: string }) {
     return <Alert tone="rose">Couldn't load the billing schedule.</Alert>;
   }
 
+  const money = (n: number | null | undefined) => formatMoney(n, data.currency);
   const isFixed = data.pricingModel === "fixed_price";
   const rows = granularity === "weekly" ? data.weekly : data.monthly;
   const monthLabel = (m: string) => {
@@ -51,12 +52,12 @@ export function BillingPanel({ projectId }: { projectId: string }) {
                 {isFixed ? "Contract value" : "Offer total"}
               </div>
               <div className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">
-                {data.totals.offerTotal != null ? formatMoney(data.totals.offerTotal) : "—"}
+                {data.totals.offerTotal != null ? money(data.totals.offerTotal) : "—"}
               </div>
               {!isFixed && data.totals.fee != null && data.totals.contingencyAmt != null && (
                 <div className="mt-0.5 text-xs text-gray-400">
-                  {formatMoney(data.totals.fee)} + {formatPercent(data.contingencyPct * 100, 0)}{" "}
-                  contingency ({formatMoney(data.totals.contingencyAmt)})
+                  {money(data.totals.fee)} + {formatPercent(data.contingencyPct * 100, 0)}{" "}
+                  contingency ({money(data.totals.contingencyAmt)})
                 </div>
               )}
             </div>
@@ -71,7 +72,7 @@ export function BillingPanel({ projectId }: { projectId: string }) {
                 {isFixed ? "Implied blended rate" : "Blended rate"}
               </div>
               <div className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">
-                {data.totals.blendedRate != null ? `${formatMoney(data.totals.blendedRate)}/h` : "—"}
+                {data.totals.blendedRate != null ? `${money(data.totals.blendedRate)}/h` : "—"}
               </div>
             </div>
             <div>
@@ -112,13 +113,13 @@ export function BillingPanel({ projectId }: { projectId: string }) {
                   <td className="px-6 py-2.5 text-gray-800">{t.name}</td>
                   <td className="px-6 py-2.5 text-gray-500">{t.projectRole}</td>
                   <td className="px-6 py-2.5 text-right tabular-nums text-gray-600">
-                    {t.billRate != null ? `${formatMoney(t.billRate)}/h` : "—"}
+                    {t.billRate != null ? `${money(t.billRate)}/h` : "—"}
                   </td>
                   <td className="px-6 py-2.5 text-right tabular-nums text-gray-600">
                     {formatHours(t.totalHours)}
                   </td>
                   <td className="px-6 py-2.5 text-right tabular-nums text-gray-800">
-                    {t.totalFee != null ? formatMoney(t.totalFee) : "—"}
+                    {t.totalFee != null ? money(t.totalFee) : "—"}
                   </td>
                 </tr>
               ))}
@@ -183,10 +184,10 @@ export function BillingPanel({ projectId }: { projectId: string }) {
                     {formatHours(r.hours)}
                   </td>
                   <td className="px-6 py-2.5 text-right tabular-nums text-gray-500">
-                    {r.blendedRate != null ? `${formatMoney(r.blendedRate)}/h` : "—"}
+                    {r.blendedRate != null ? `${money(r.blendedRate)}/h` : "—"}
                   </td>
                   <td className="px-6 py-2.5 text-right tabular-nums text-gray-800">
-                    {r.fee != null ? formatMoney(r.fee) : "—"}
+                    {r.fee != null ? money(r.fee) : "—"}
                   </td>
                 </tr>
               ))}
@@ -198,10 +199,10 @@ export function BillingPanel({ projectId }: { projectId: string }) {
                   {formatHours(data.totals.hours)}
                 </td>
                 <td className="px-6 py-2.5 text-right tabular-nums text-gray-500">
-                  {data.totals.blendedRate != null ? `${formatMoney(data.totals.blendedRate)}/h` : "—"}
+                  {data.totals.blendedRate != null ? `${money(data.totals.blendedRate)}/h` : "—"}
                 </td>
                 <td className="px-6 py-2.5 text-right tabular-nums text-gray-800">
-                  {data.totals.fee != null ? formatMoney(data.totals.fee) : "—"}
+                  {data.totals.fee != null ? money(data.totals.fee) : "—"}
                 </td>
               </tr>
             </tfoot>

@@ -338,7 +338,7 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
                 <div>
                   <span className="text-gray-500">Planned fee</span>{" "}
-                  <span className="font-medium text-gray-800">{formatMoney(fin.adjustedFee)}</span>
+                  <span className="font-medium text-gray-800">{formatMoney(fin.adjustedFee, data.project.currency)}</span>
                   {(fin.contingencyAmt ?? 0) > 0 && (
                     <span className="text-xs text-gray-400">
                       {" "}
@@ -348,7 +348,7 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
                 </div>
                 <div>
                   <span className="text-gray-500">Planned cost</span>{" "}
-                  <span className="font-medium text-gray-800">{formatMoney(fin.plannedCost)}</span>
+                  <span className="font-medium text-gray-800">{formatMoney(fin.plannedCost, data.project.currency)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="text-gray-500">Planned margin</span>
@@ -435,16 +435,16 @@ function SummaryMetrics({ data }: { data: ProjectDetail }) {
             <>
               <Metric
                 label="Quoted fee"
-                value={formatMoney(f.totalFee)}
-                hint={f.adjustedFee !== undefined ? `+ contingency ${formatMoney(f.adjustedFee)}` : undefined}
+                value={formatMoney(f.totalFee, data.project.currency)}
+                hint={f.adjustedFee !== undefined ? `+ contingency ${formatMoney(f.adjustedFee, data.project.currency)}` : undefined}
               />
               {f.totalCost !== undefined && (
                 <Metric
                   label="Cost"
-                  value={formatMoney(f.totalCost)}
+                  value={formatMoney(f.totalCost, data.project.currency)}
                   hint={
                     f.totalActualCost !== undefined
-                      ? `Actual ${formatMoney(f.totalActualCost)}`
+                      ? `Actual ${formatMoney(f.totalActualCost, data.project.currency)}`
                       : undefined
                   }
                 />
@@ -551,7 +551,7 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                   </td>
                   {!isFixedPrice && assignments.some((x) => x.plannedFee !== undefined) && (
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                      {a.plannedFee != null ? formatMoney(a.plannedFee) : "—"}
+                      {a.plannedFee != null ? formatMoney(a.plannedFee, data.project.currency) : "—"}
                     </td>
                   )}
                 </tr>

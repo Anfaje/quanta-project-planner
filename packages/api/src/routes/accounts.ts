@@ -2,6 +2,8 @@ import { Router, Request, Response } from "express";
 import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { requireAuth } from "../middleware/auth";
+import type { Currency } from "@prisma/client";
+import { isCurrency, fxFactor } from "../services/currency";
 
 /**
  * Account summaries — revenue, cost, profit, margin, and project counts per
@@ -46,6 +48,9 @@ router.get("/summary", async (req: Request, res: Response) => {
     ? (requested as Scope)
     : "lifetime";
 
+  // Display currency — per-project amounts convert at the rate level.
+  const display: Currency = isCurrency(req.query.currency) ? req.query.currency : "USD";
+
   const isAa = user.roles.includes(Role.AA);
   const isBul = user.roles.includes(Role.BUL);
   const isAc = user.roles.includes(Role.AC);
@@ -89,6 +94,7 @@ router.get("/summary", async (req: Request, res: Response) => {
       endDate: true,
       pricingModel: true,
       fixedPrice: true,
+      currency: true,
       account: { select: { id: true, name: true, code: true } },
       assignments: {
         select: {
@@ -123,6 +129,7 @@ router.get("/summary", async (req: Request, res: Response) => {
   for (const acc of baseAccounts) aggFor(acc);
 
   for (const p of projects) {
+    const fx = fxFactor(p.currency, display);
     let winRevenue = 0;
     let winCost = 0;
     let plannedTotal = 0;
@@ -130,8 +137,8 @@ router.get("/summary", async (req: Request, res: Response) => {
     let actualThroughEnd = 0;
 
     for (const a of p.assignments) {
-      const bill = a.billRate != null ? Number(a.billRate) : 0;
-      const cost = a.costRate != null ? Number(a.costRate) : 0;
+      const bill = a.billRate != null ? Number(a.billRate) * fx : 0;
+      const cost = a.costRate != null ? Number(a.costRate) * fx : 0;
       for (const e of a.hourEntries) {
         plannedTotal += e.plannedHours != null ? Number(e.plannedHours) : 0;
         const actual = e.actualHours != null ? Number(e.actualHours) : 0;
@@ -148,7 +155,7 @@ router.get("/summary", async (req: Request, res: Response) => {
     }
 
     if (p.pricingModel === "fixed_price") {
-      const contract = p.fixedPrice != null ? Number(p.fixedPrice) : 0;
+      const contract = p.fixedPrice != null ? Number(p.fixedPrice) * fx : 0;
       const recognized = (hours: number) =>
         plannedTotal > 0
           ? contract * Math.min(hours / plannedTotal, 1)
@@ -197,7 +204,7 @@ router.get("/summary", async (req: Request, res: Response) => {
     activeProjects: accounts.reduce((t, a) => t + a.activeProjects, 0),
   };
 
-  res.json({ scope, slice, accounts, totals });
+  res.json({ scope, displayCurrency: display, slice, accounts, totals });
 });
 
 export default router;

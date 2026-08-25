@@ -27,6 +27,7 @@ export function DriftPanel({ projectId }: { projectId: string }) {
     return <Alert tone="rose">Couldn't load the baseline comparison.</Alert>;
   }
 
+  const money = (n: number | null | undefined) => formatMoney(n, data.currency);
   const t = data.totals;
   const drift = t.hoursDriftPct;
   const driftTone = drift == null ? "gray" : Math.abs(drift) < 5 ? "emerald" : "amber";
@@ -61,13 +62,13 @@ export function DriftPanel({ projectId }: { projectId: string }) {
                 <div>
                   <div className="text-xs text-gray-500">Planned fee</div>
                   <div className="mt-1 text-sm text-gray-800 tabular-nums">
-                    {formatMoney(t.baselineFee)} → <strong>{formatMoney(t.currentFee)}</strong>
+                    {money(t.baselineFee)} → <strong>{money(t.currentFee)}</strong>
                   </div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Planned cost</div>
                   <div className="mt-1 text-sm text-gray-800 tabular-nums">
-                    {formatMoney(t.baselineCost)} → <strong>{formatMoney(t.currentCost)}</strong>
+                    {money(t.baselineCost)} → <strong>{money(t.currentCost)}</strong>
                   </div>
                 </div>
                 <div>

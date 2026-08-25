@@ -2,7 +2,7 @@ import React, { useState, useEffect, useId, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
-import type {
+import type { Currency,
   AdminAccount,
   AdminBusinessUnit,
   AdminUser,
@@ -26,7 +26,7 @@ import {
 } from "../components/ui";
 import { formatDate, formatHours, formatMoney, formatPercent } from "../lib/format";
 import { ReviewerShareModal } from "../components/ReviewerShareModal";
-import { effectiveCost, isCrossBu } from "../lib/constants";
+import { CURRENCIES, effectiveCost, isCrossBu } from "../lib/constants";
 
 /**
  * Project creation wizard.
@@ -70,6 +70,7 @@ interface WizardState {
   endDate: string;   // YYYY-MM-DD
   contingencyPct: number; // 0..1 (e.g., 0.15)
   pricingModel: PricingModel;
+  currency: Currency;
   fixedPrice: number; // contract value, used only when pricingModel is fixed_price
   description: string;
   resources: ResourceDraft[];
@@ -146,6 +147,7 @@ export function ProjectWizardPage() {
     endDate: "",
     contingencyPct: 0.15,
     pricingModel: "time_and_materials",
+    currency: "USD",
     fixedPrice: 0,
     description: "",
     resources: [],
@@ -189,6 +191,7 @@ export function ProjectWizardPage() {
       endDate: p.endDate.slice(0, 10),
       contingencyPct: p.contingencyPct,
       pricingModel: p.pricingModel,
+      currency: p.currency,
       fixedPrice: p.fixedPrice ?? 0,
       description: p.description ?? "",
       resources,
@@ -216,6 +219,7 @@ export function ProjectWizardPage() {
       endDate: state.endDate,
       contingencyPct: state.contingencyPct,
       pricingModel: state.pricingModel,
+      currency: state.currency,
       ...(isFixedPrice ? { fixedPrice: state.fixedPrice } : {}),
       description: state.description || undefined,
       assignments: state.resources.map((r) => ({
@@ -658,6 +662,23 @@ function Step1Basics({
               {state.pricingModel === "fixed_price"
                 ? "A single contract value; resources have no bill rate."
                 : "Revenue is billed per hour at each resource's rate."}
+            </div>
+          </Field>
+
+          <Field label="Currency">
+            <select
+              value={state.currency}
+              onChange={(e) => setState({ ...state, currency: e.target.value as Currency })}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white"
+            >
+              {CURRENCIES.map((cur) => (
+                <option key={cur} value={cur}>
+                  {cur}
+                </option>
+              ))}
+            </select>
+            <div className="text-xs text-gray-400 mt-1">
+              All rates, fees, and the contract value on this project are in this currency.
             </div>
           </Field>
 
@@ -1172,10 +1193,10 @@ function Step4Financials({
           />
           <MetricBig
             label={isFixedPrice ? "Contract value" : "Quoted fee"}
-            value={formatMoney(isFixedPrice ? revenue : totalFee)}
-            hint={isFixedPrice ? "fixed price" : `+ ${formatMoney(contingencyAmt)} contingency`}
+            value={formatMoney(isFixedPrice ? revenue : totalFee, state.currency)}
+            hint={isFixedPrice ? "fixed price" : `+ ${formatMoney(contingencyAmt, state.currency)} contingency`}
           />
-          <MetricBig label="Cost" value={formatMoney(totalCost)} />
+          <MetricBig label="Cost" value={formatMoney(totalCost, state.currency)} />
           <MetricBig
             label="Margin"
             value={formatPercent(margin)}
@@ -1215,11 +1236,11 @@ function Step4Financials({
                   </td>
                   {!isFixedPrice && (
                     <td className="px-4 py-2 text-right text-gray-700 tabular-nums">
-                      {formatMoney(r.plannedFee)}
+                      {formatMoney(r.plannedFee, state.currency)}
                     </td>
                   )}
                   <td className="px-4 py-2 text-right text-gray-500 tabular-nums">
-                    {formatMoney(r.plannedCost)}
+                    {formatMoney(r.plannedCost, state.currency)}
                   </td>
                 </tr>
               ))}
@@ -1233,10 +1254,10 @@ function Step4Financials({
                   {formatHours(totalHours)}h
                 </td>
                 <td className="px-4 py-2 text-right text-gray-900 tabular-nums">
-                  {formatMoney(totalFee)}
+                  {formatMoney(totalFee, state.currency)}
                 </td>
                 <td className="px-4 py-2 text-right text-gray-900 tabular-nums">
-                  {formatMoney(totalCost)}
+                  {formatMoney(totalCost, state.currency)}
                 </td>
               </tr>
             </tfoot>
@@ -1298,7 +1319,7 @@ function Step5Review({
               }
             />
             {state.pricingModel === "fixed_price" ? (
-              <ReviewField label="Pricing" value={`Fixed price · ${formatMoney(state.fixedPrice)}`} />
+              <ReviewField label="Pricing" value={`Fixed price · ${formatMoney(state.fixedPrice, state.currency)}`} />
             ) : (
               <ReviewField label="Contingency" value={formatPercent(state.contingencyPct * 100, 0)} />
             )}

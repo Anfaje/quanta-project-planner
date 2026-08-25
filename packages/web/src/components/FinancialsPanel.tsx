@@ -73,7 +73,7 @@ export function FinancialsPanel({ detail }: { detail: ProjectDetail }) {
                 <FeeCostChart
                   burn={burnQ.data}
                   isFixedPrice={detail.project.pricingModel === "fixed_price"}
-                />
+                 currency={detail.project.currency}/>
               )}
             </CardBody>
           </Card>
@@ -101,6 +101,8 @@ export function FinancialsPanel({ detail }: { detail: ProjectDetail }) {
 // ═══════════════════════════════════════════════════════════════
 
 function MetricsHeader({ detail }: { detail: ProjectDetail }) {
+  const money = (n: number | null | undefined, cents = false) =>
+    formatMoney(n, detail.project.currency, cents);
   const f = detail.financials;
   const isFixedPrice = detail.project.pricingModel === "fixed_price";
   const fee = f.totalFee ?? 0;
@@ -118,32 +120,32 @@ function MetricsHeader({ detail }: { detail: ProjectDetail }) {
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
       <MetricCard
         label={isFixedPrice ? "Contract value" : "Quoted fee"}
-        value={formatMoney(fee)}
+        value={money(fee)}
         hint={
           isFixedPrice
             ? "fixed price"
             : f.adjustedFee !== undefined
-            ? `+ ${formatMoney(f.adjustedFee - fee)} contingency`
+            ? `+ ${money(f.adjustedFee - fee)} contingency`
             : undefined
         }
       />
       {isFixedPrice ? (
         <MetricCard
           label="Projected cost"
-          value={formatMoney(cost)}
+          value={money(cost)}
           hint={`${fee > 0 ? ((cost / fee) * 100).toFixed(0) : 0}% of contract`}
         />
       ) : (
         <MetricCard
           label="Fee burned"
-          value={formatMoney(actualFee)}
+          value={money(actualFee)}
           hint={`${feeProgress.toFixed(0)}% of quote`}
           bar={{ pct: Math.min(100, feeProgress), tone: feeProgress > 100 ? "rose" : "indigo" }}
         />
       )}
       <MetricCard
         label="Cost burned"
-        value={formatMoney(actualCost)}
+        value={money(actualCost)}
         hint={`${costProgress.toFixed(0)}% of plan`}
         bar={{
           pct: Math.min(100, costProgress),
@@ -173,7 +175,16 @@ function MetricsHeader({ detail }: { detail: ProjectDetail }) {
 // Fee/cost cumulative line chart
 // ═══════════════════════════════════════════════════════════════
 
-function FeeCostChart({ burn, isFixedPrice }: { burn: BurnSeries; isFixedPrice: boolean }) {
+function FeeCostChart({
+  burn,
+  isFixedPrice,
+  currency,
+}: {
+  burn: BurnSeries;
+  isFixedPrice: boolean;
+  currency: string;
+}) {
+  const money = (n: number | null | undefined) => formatMoney(n, currency);
   if (!burn.includesFinancials || burn.series.length === 0) {
     return (
       <EmptyState
@@ -209,7 +220,7 @@ function FeeCostChart({ burn, isFixedPrice }: { burn: BurnSeries; isFixedPrice: 
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}
             labelFormatter={(label, p) => `${label} · ${p?.[0]?.payload?.dateLabel ?? ""}`}
-            formatter={(value: number) => formatMoney(value)}
+            formatter={(value: number) => money(value)}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           {!isFixedPrice && (
@@ -263,6 +274,8 @@ function FeeCostChart({ burn, isFixedPrice }: { burn: BurnSeries; isFixedPrice: 
 const PIE_COLORS = ["#4f46e5", "#0ea5e9", "#10b981", "#f59e0b", "#f43f5e", "#8b5cf6", "#14b8a6", "#ec4899"];
 
 function ResourceBreakdown({ detail }: { detail: ProjectDetail }) {
+  const money = (n: number | null | undefined, cents = false) =>
+    formatMoney(n, detail.project.currency, cents);
   const data = detail.assignments
     .map((a) => ({
       name: a.user.name,
@@ -299,7 +312,7 @@ function ResourceBreakdown({ detail }: { detail: ProjectDetail }) {
                       <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(v: number) => formatMoney(v)} />
+                  <Tooltip formatter={(v: number) => money(v)} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -316,7 +329,7 @@ function ResourceBreakdown({ detail }: { detail: ProjectDetail }) {
                       <span className="text-gray-700 truncate">{r.name}</span>
                     </div>
                     <div className="text-gray-500 tabular-nums flex-shrink-0 ml-2">
-                      {formatMoney(r.cost)} ({pct.toFixed(0)}%)
+                      {money(r.cost)} ({pct.toFixed(0)}%)
                     </div>
                   </div>
                 );
@@ -339,6 +352,8 @@ function ResourceBreakdown({ detail }: { detail: ProjectDetail }) {
 // ═══════════════════════════════════════════════════════════════
 
 function ResourceFinancialsTable({ detail }: { detail: ProjectDetail }) {
+  const money = (n: number | null | undefined, cents = false) =>
+    formatMoney(n, detail.project.currency, cents);
   const isFixedPrice = detail.project.pricingModel === "fixed_price";
   return (
     <div className="overflow-x-auto">
@@ -388,19 +403,19 @@ function ResourceFinancialsTable({ detail }: { detail: ProjectDetail }) {
                 </td>
                 {!isFixedPrice && (
                   <td className="px-6 py-3 text-right text-gray-600 tabular-nums">
-                    {formatMoney(planFee)}
+                    {money(planFee)}
                   </td>
                 )}
                 {!isFixedPrice && (
                   <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                    {formatMoney(actFee)}
+                    {money(actFee)}
                   </td>
                 )}
                 <td className="px-6 py-3 text-right text-gray-600 tabular-nums">
-                  {formatMoney(planCost)}
+                  {money(planCost)}
                 </td>
                 <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                  {formatMoney(actCost)}
+                  {money(actCost)}
                 </td>
                 {!isFixedPrice && (
                   <td className="px-6 py-3 text-right">

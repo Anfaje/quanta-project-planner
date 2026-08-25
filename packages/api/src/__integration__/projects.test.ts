@@ -462,6 +462,31 @@ describe("POST /api/projects", () => {
     await icAgent.get(`/api/projects/${created.body.projectId}/billing`).expect(403);
   });
 
+  it("projects carry a currency (default USD), exposed on detail and billing", async () => {
+    const { pm, body } = await basePayload(prisma);
+    const agent = await authenticateAs(app, pm.email);
+
+    const dkk = await agent
+      .post("/api/projects")
+      .send({
+        ...body,
+        currency: "DKK",
+        plannedHours: [{ userId: pm.id, projectWeek: 0, plannedHours: 10 }],
+      })
+      .expect(201);
+    const detail = await agent.get(`/api/projects/${dkk.body.projectId}`).expect(200);
+    expect(detail.body.project.currency).toBe("DKK");
+    const billing = await agent.get(`/api/projects/${dkk.body.projectId}/billing`).expect(200);
+    expect(billing.body.currency).toBe("DKK");
+
+    const usd = await agent
+      .post("/api/projects")
+      .send({ ...body, projectCode: `${body.projectCode}2` })
+      .expect(201);
+    const d2 = await agent.get(`/api/projects/${usd.body.projectId}`).expect(200);
+    expect(d2.body.project.currency).toBe("USD");
+  });
+
   it("PUT /:id 409s on a non-draft project", async () => {
     const bu = await getDefaultBu(prisma);
     const account = await getDefaultAccount(prisma);

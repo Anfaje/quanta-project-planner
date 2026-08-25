@@ -21,3 +21,6 @@ export function isCrossBu(personBuCode: string, owningBuCode: string): boolean {
 
 /** Target planned margin (%) — below this a project is at-risk and draft approval warns. */
 export const TARGET_MARGIN_PCT = 35;
+
+/** Supported project currencies (mirror of the API enum). */
+export const CURRENCIES = ["USD", "GBP", "DKK", "EUR", "CHF", "CAD"] as const;

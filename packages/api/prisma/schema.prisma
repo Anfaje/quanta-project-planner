@@ -35,6 +35,18 @@ enum Role {
   AA
 }
 
+// Project pricing currency. Rates, fees, and fixed prices on a project are
+// denominated in its currency; cross-project aggregations convert at display
+// time (services/currency.ts).
+enum Currency {
+  USD
+  GBP
+  DKK
+  EUR
+  CHF
+  CAD
+}
+
 // ── User ──
 
 model User {
@@ -145,6 +157,7 @@ model Project {
   contingencyPct Decimal       @default(0.15) @map("contingency_pct") @db.Decimal(5, 4)
   status         ProjectStatus @default(active)
   pricingModel   PricingModel  @default(time_and_materials) @map("pricing_model")
+  currency      Currency     @default(USD)
   fixedPrice     Decimal?      @map("fixed_price") @db.Decimal(12, 2)
   description    String?
   // Draft review feedback: set when an approver rejects a draft (the draft is

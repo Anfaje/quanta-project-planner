@@ -27,7 +27,7 @@ describe("formatMoney", () => {
   });
 
   it("renders cents when requested", () => {
-    expect(formatMoney(1234.56, true)).toBe("$1,234.56");
+    expect(formatMoney(1234.56, "USD", true)).toBe("$1,234.56");
   });
 
   it("shows em-dash for null and undefined", () => {

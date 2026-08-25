@@ -4,8 +4,8 @@ import { api } from "../lib/api";
 import { Layout } from "../components/Layout";
 import { Card, PageHeader, Spinner, Alert, Badge } from "../components/ui";
 import { formatMoney, formatPercent } from "../lib/format";
-import { TARGET_MARGIN_PCT } from "../lib/constants";
-import type { AccountsSummary } from "../lib/types";
+import { TARGET_MARGIN_PCT, CURRENCIES } from "../lib/constants";
+import type { AccountsSummary, Currency } from "../lib/types";
 
 const SCOPES = [
   { id: "lifetime", label: "Lifetime" },
@@ -21,10 +21,13 @@ type Scope = (typeof SCOPES)[number]["id"];
  */
 export function AccountsPage() {
   const [scope, setScope] = useState<Scope>("ytd");
+  const [currency, setCurrency] = useState<Currency>("USD");
   const { data, isLoading, error } = useQuery({
-    queryKey: ["accounts", "summary", scope],
-    queryFn: () => api.get<AccountsSummary>(`/api/accounts/summary?scope=${scope}`),
+    queryKey: ["accounts", "summary", scope, currency],
+    queryFn: () => api.get<AccountsSummary>(`/api/accounts/summary?scope=${scope}&currency=${currency}`),
   });
+
+  const money = (n: number | null | undefined) => formatMoney(n, currency);
 
   return (
     <Layout>
@@ -32,6 +35,19 @@ export function AccountsPage() {
         title="Accounts"
         subtitle="Revenue, profitability, and project volume per client account."
         actions={
+          <div className="flex items-center gap-2">
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as Currency)}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-medium text-gray-700"
+            aria-label="Display currency"
+          >
+            {CURRENCIES.map((cur) => (
+              <option key={cur} value={cur}>
+                {cur}
+              </option>
+            ))}
+          </select>
           <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
             {SCOPES.map((s) => (
               <button
@@ -46,6 +62,7 @@ export function AccountsPage() {
                 {s.label}
               </button>
             ))}
+          </div>
           </div>
         }
       />
@@ -100,17 +117,17 @@ export function AccountsPage() {
                         )}
                       </td>
                       <td className="px-6 py-3 text-right tabular-nums text-gray-800">
-                        {formatMoney(a.revenue)}
+                        {money(a.revenue)}
                       </td>
                       <td className="px-6 py-3 text-right tabular-nums text-gray-600">
-                        {formatMoney(a.cost)}
+                        {money(a.cost)}
                       </td>
                       <td
                         className={`px-6 py-3 text-right tabular-nums ${
                           a.profit < 0 ? "text-rose-600" : "text-gray-800"
                         }`}
                       >
-                        {formatMoney(a.profit)}
+                        {money(a.profit)}
                       </td>
                       <td className="px-6 py-3 text-right">
                         {a.marginPct == null ? (
@@ -137,17 +154,17 @@ export function AccountsPage() {
                       )}
                     </td>
                     <td className="px-6 py-3 text-right tabular-nums text-gray-800">
-                      {formatMoney(data.totals.revenue)}
+                      {money(data.totals.revenue)}
                     </td>
                     <td className="px-6 py-3 text-right tabular-nums text-gray-700">
-                      {formatMoney(data.totals.cost)}
+                      {money(data.totals.cost)}
                     </td>
                     <td
                       className={`px-6 py-3 text-right tabular-nums ${
                         data.totals.profit < 0 ? "text-rose-600" : "text-gray-800"
                       }`}
                     >
-                      {formatMoney(data.totals.profit)}
+                      {money(data.totals.profit)}
                     </td>
                     <td className="px-6 py-3 text-right">
                       {data.totals.marginPct == null ? (
