@@ -5,6 +5,8 @@ import { requireAuth } from "../middleware/auth";
 import { getDashboardSections, canViewFinancials } from "../lib/permissions";
 import { buildProjectAccessFilter } from "../services/projectAccess";
 import { computeProjectFinancials, TARGET_MARGIN_PCT } from "../services/financialCalc";
+import { Currency } from "@prisma/client";
+import { isCurrency, fxFactor, convert, scaleRate } from "../services/currency";
 import { serializeForUser } from "../services/financialSerializer";
 
 const router = Router();
@@ -28,6 +30,9 @@ router.use(requireAuth);
 router.get("/", async (req: Request, res: Response) => {
   const user = req.authUser!;
   const sections = getDashboardSections(user);
+  // Display currency for all money on the dashboard. Conversion happens at
+  // the rate level per project, so percentages are unaffected. Default USD.
+  const display: Currency = isCurrency(req.query.currency) ? req.query.currency : "USD";
 
   const payload: Record<string, any> = {
     user: {
@@ -47,23 +52,25 @@ router.get("/", async (req: Request, res: Response) => {
 
   // ── project_health (PM) ──
   if (sections.includes("project_health")) {
-    payload.projectHealth = await buildProjectHealthSection(user);
+    payload.projectHealth = await buildProjectHealthSection(user, display);
   }
 
   // ── account_overview (AC) ──
   if (sections.includes("account_overview")) {
-    payload.accountOverview = await buildAccountOverviewSection(user);
+    payload.accountOverview = await buildAccountOverviewSection(user, display);
   }
 
   // ── bu_health (BUL) ──
   if (sections.includes("bu_health")) {
-    payload.buHealth = await buildBuHealthSection(user);
+    payload.buHealth = await buildBuHealthSection(user, display);
   }
 
   // ── platform_admin (AA) ──
   if (sections.includes("platform_admin")) {
     payload.platformAdmin = await buildPlatformAdminSection();
   }
+
+  payload.displayCurrency = display;
 
   res.json(payload);
 });
@@ -117,7 +124,7 @@ async function buildMyHoursSection(user: any) {
   });
 }
 
-async function buildProjectHealthSection(user: any) {
+async function buildProjectHealthSection(user: any, display: Currency) {
   // Projects the user can see (via any role), focused on active ones.
   const accessFilter = buildProjectAccessFilter(user);
   const projects = await prisma.project.findMany({
@@ -155,14 +162,15 @@ async function buildProjectHealthSection(user: any) {
       projectOwningBuId: p.owningBuId,
       projectSharedBuIds: p.shares.map((s) => s.sharedWithBuId),
     };
+    const fx = fxFactor(p.currency, display);
     const fin = computeProjectFinancials(
       p.assignments.map((a) => ({
-        billRate: a.billRate,
-        costRate: a.costRate,
+        billRate: scaleRate(a.billRate, fx),
+        costRate: scaleRate(a.costRate, fx),
         entries: a.hourEntries,
       })),
       p.contingencyPct,
-      { pricingModel: p.pricingModel, fixedPrice: p.fixedPrice }
+      { pricingModel: p.pricingModel, fixedPrice: scaleRate(p.fixedPrice, fx) }
     );
     // EAC vs planned — a simple health signal anyone can see.
     const overrun = fin.totalPlannedHours > 0
@@ -202,7 +210,7 @@ async function buildProjectHealthSection(user: any) {
   });
 }
 
-async function buildAccountOverviewSection(user: any) {
+async function buildAccountOverviewSection(user: any, display: Currency) {
   if (user.managedAccountIds.length === 0) return { accounts: [] };
 
   const accounts = await prisma.account.findMany({
@@ -227,14 +235,15 @@ async function buildAccountOverviewSection(user: any) {
           projectOwningBuId: p.owningBuId,
           projectSharedBuIds: p.shares.map((s) => s.sharedWithBuId),
         };
-        const fin = computeProjectFinancials(
+        const fx = fxFactor(p.currency, display);
+    const fin = computeProjectFinancials(
           p.assignments.map((a) => ({
-            billRate: a.billRate,
-            costRate: a.costRate,
+            billRate: scaleRate(a.billRate, fx),
+            costRate: scaleRate(a.costRate, fx),
             entries: a.hourEntries,
           })),
           p.contingencyPct,
-          { pricingModel: p.pricingModel, fixedPrice: p.fixedPrice }
+          { pricingModel: p.pricingModel, fixedPrice: scaleRate(p.fixedPrice, fx) }
         );
         return serializeForUser(
           {
@@ -333,7 +342,7 @@ function computeMonthlyTrajectory(
   }));
 }
 
-async function buildBuHealthSection(user: any) {
+async function buildBuHealthSection(user: any, display: Currency) {
   const buId = user.primaryBuId;
 
   // Fetch the BU first so we can key the config lookup by its code.
@@ -379,14 +388,15 @@ async function buildBuHealthSection(user: any) {
   let atRiskCount = 0;
 
   for (const p of projects) {
+    const fx = fxFactor(p.currency, display);
     const fin = computeProjectFinancials(
       p.assignments.map((a) => ({
-        billRate: a.billRate,
-        costRate: a.costRate,
+        billRate: scaleRate(a.billRate, fx),
+        costRate: scaleRate(a.costRate, fx),
         entries: a.hourEntries,
       })),
       p.contingencyPct,
-      { pricingModel: p.pricingModel, fixedPrice: p.fixedPrice }
+      { pricingModel: p.pricingModel, fixedPrice: scaleRate(p.fixedPrice, fx) }
     );
     ytdRevenue += fin.totalActualFee;
     ytdCost += fin.totalActualCost;
@@ -398,7 +408,12 @@ async function buildBuHealthSection(user: any) {
 
   const configMap: Record<string, string> = {};
   for (const c of config) configMap[c.key] = c.value;
-  const revenueTarget = Number(configMap[`yearly_revenue_target_${buCode}`] ?? "0");
+  // Targets are configured in USD; convert to the display currency.
+  const revenueTarget = convert(
+    Number(configMap[`yearly_revenue_target_${buCode}`] ?? "0"),
+    "USD",
+    display
+  );
   const marginTarget = Number(configMap["yearly_margin_target"] ?? "0.40");
   const headcountTarget = Number(configMap[`headcount_target_${buCode}`] ?? "0");
 
@@ -416,7 +431,19 @@ async function buildBuHealthSection(user: any) {
   // pro-rata of the annual config values (a reasonable pace line until a
   // month-by-month plan exists). Financial series are omitted for viewers
   // without financial visibility — headcount still shows.
-  result.trajectory = computeMonthlyTrajectory(projects, {
+  result.trajectory = computeMonthlyTrajectory(
+    projects.map((p) => {
+      const fx = fxFactor(p.currency, display);
+      return {
+        ...p,
+        assignments: p.assignments.map((a) => ({
+          ...a,
+          billRate: scaleRate(a.billRate, fx),
+          costRate: scaleRate(a.costRate, fx),
+        })),
+      };
+    }),
+    {
     year: new Date().getUTCFullYear(),
     revenueTarget,
     marginTarget,

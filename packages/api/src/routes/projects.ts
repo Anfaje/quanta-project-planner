@@ -92,6 +92,7 @@ router.get("/", async (req: Request, res: Response) => {
       shares: { select: { sharedWithBuId: true } },
       pricingModel: true,
       fixedPrice: true,
+      currency: true,
       assignments: {
         select: {
           billRate: true,
@@ -147,6 +148,7 @@ router.get("/", async (req: Request, res: Response) => {
         startDate: p.startDate,
         endDate: p.endDate,
         contingencyPct: Number(p.contingencyPct),
+        currency: p.currency,
         account: p.account,
         owningBu: p.owningBu,
         resourceCount: p.assignments.length,
@@ -371,6 +373,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       name: project.name,
       projectCode: project.projectCode,
       status: project.status,
+      currency: project.currency,
       pricingModel: project.pricingModel,
       fixedPrice: project.fixedPrice != null ? Number(project.fixedPrice) : null,
       description: project.description,
@@ -510,6 +513,7 @@ router.post("/", async (req: Request, res: Response) => {
           endDate,
           contingencyPct: new Prisma.Decimal(isFixedPrice ? 0 : data.contingencyPct),
           pricingModel: data.pricingModel,
+          currency: data.currency,
           fixedPrice: isFixedPrice ? new Prisma.Decimal(data.fixedPrice!) : null,
           description: data.description,
           createdById: user.id,
@@ -600,6 +604,7 @@ router.get("/:id/baseline-comparison", async (req: Request, res: Response) => {
       contingencyPct: true,
       pricingModel: true,
       fixedPrice: true,
+      currency: true,
       assignments: {
         select: {
           userId: true,
@@ -665,6 +670,7 @@ router.get("/:id/baseline-comparison", async (req: Request, res: Response) => {
 
   res.json({
     capturedAt: bl.capturedAt,
+    currency: project.currency,
     baseline: {
       startDate: snap.startDate,
       endDate: snap.endDate,
@@ -715,6 +721,7 @@ router.get("/:id/billing", async (req: Request, res: Response) => {
     where: { id: ctx.id },
     select: {
       pricingModel: true,
+      currency: true,
       fixedPrice: true,
       contingencyPct: true,
       startDate: true,
@@ -795,6 +802,7 @@ router.get("/:id/billing", async (req: Request, res: Response) => {
 
   res.json({
     pricingModel: project.pricingModel,
+    currency: project.currency,
     fixedPrice,
     contingencyPct,
     startDate: project.startDate,
@@ -911,6 +919,7 @@ router.put("/:id", async (req: Request, res: Response) => {
           endDate,
           contingencyPct: new Prisma.Decimal(isFixedPrice ? 0 : data.contingencyPct),
           pricingModel: data.pricingModel,
+          currency: data.currency,
           fixedPrice: isFixedPrice ? new Prisma.Decimal(data.fixedPrice!) : null,
           description: data.description,
           // projectCode + status + createdById are intentionally preserved.

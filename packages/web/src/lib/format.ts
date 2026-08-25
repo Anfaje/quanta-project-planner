@@ -4,23 +4,30 @@
  * signed percentages, etc.), not math.
  */
 
-const fmtUsd = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
 
-const fmtUsdCents = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const moneyFmts = new Map<string, Intl.NumberFormat>();
+function moneyFmt(currency: string, cents: boolean): Intl.NumberFormat {
+  const key = `${currency}:${cents}`;
+  let fmt = moneyFmts.get(key);
+  if (!fmt) {
+    fmt = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: cents ? 2 : 0,
+      maximumFractionDigits: cents ? 2 : 0,
+    });
+    moneyFmts.set(key, fmt);
+  }
+  return fmt;
+}
 
-export function formatMoney(n: number | null | undefined, withCents = false): string {
+export function formatMoney(
+  n: number | null | undefined,
+  currency: string = "USD",
+  withCents = false
+): string {
   if (n == null) return "—";
-  return (withCents ? fmtUsdCents : fmtUsd).format(n);
+  return moneyFmt(currency, withCents).format(n);
 }
 
 export function formatHours(n: number | null | undefined): string {

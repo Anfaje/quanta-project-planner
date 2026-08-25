@@ -160,3 +160,47 @@ describe("GET /api/accounts/summary", () => {
     await agent.get("/api/accounts/summary").expect(403);
   });
 });
+
+describe("multi-currency display conversion", () => {
+  it("converts each project's currency into the requested display currency", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    const worker = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    const proj = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: aa!.id,
+      startDate: new Date(Date.now() - 14 * DAY),
+      totalWeeks: 1,
+      assignments: [{ userId: worker.id, projectRole: "Dev", billRate: 1000, costRate: 500 }],
+      seedHours: { plannedPerWeek: 10, actualPerWeek: 10 },
+    });
+    // 10h × 1000 DKK = 10,000 DKK revenue; 5,000 DKK cost.
+    await prisma.project.update({ where: { id: proj.id }, data: { currency: "DKK" } });
+
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+
+    // USD display (default): DKK converts at 0.145 USD/DKK.
+    const usd = await agent.get("/api/accounts/summary?scope=lifetime").expect(200);
+    expect(usd.body.displayCurrency).toBe("USD");
+    const rowUsd = row(usd.body, account.id);
+    expect(rowUsd.revenue).toBe(1450);
+    expect(rowUsd.cost).toBe(725);
+
+    // DKK display: the same project shows its native amounts.
+    const dkk = await agent.get("/api/accounts/summary?scope=lifetime&currency=DKK").expect(200);
+    expect(dkk.body.displayCurrency).toBe("DKK");
+    const rowDkk = row(dkk.body, account.id);
+    expect(rowDkk.revenue).toBe(10000);
+    expect(rowDkk.cost).toBe(5000);
+    // Margin % is currency-independent.
+    expect(rowDkk.marginPct).toBe(rowUsd.marginPct);
+  });
+
+  it("dashboard accepts a display currency", async () => {
+    const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    const res = await agent.get("/api/dashboard?currency=EUR").expect(200);
+    expect(res.body.displayCurrency).toBe("EUR");
+  });
+});

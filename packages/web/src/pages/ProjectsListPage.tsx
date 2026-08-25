@@ -165,7 +165,7 @@ export function ProjectsListPage() {
                         : "—"}
                     </td>
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                      {p.totalFee != null ? formatMoney(p.totalFee) : "—"}
+                      {p.totalFee != null ? formatMoney(p.totalFee, p.currency) : "—"}
                     </td>
                     <td className="px-6 py-3 text-right">
                       {p.marginPct != null ? (

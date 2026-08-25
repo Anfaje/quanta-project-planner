@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { HoursGridPanel } from "../components/HoursGridPanel";
+import { CURRENCIES } from "../lib/constants";
 import { Link } from "react-router-dom";
 import {
   LineChart,
@@ -13,7 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { api } from "../lib/api";
-import type { Dashboard, BuHealthTrajectoryPoint } from "../lib/types";
+import type { Currency, Dashboard, BuHealthTrajectoryPoint } from "../lib/types";
 import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
 import { Card, CardBody, CardHeader, Badge, Spinner, Alert, EmptyState } from "../components/ui";
@@ -35,20 +36,37 @@ import {
 
 export function DashboardPage() {
   const me = useMe();
+  const [currency, setCurrency] = useState<Currency>("USD");
   const { data, isLoading, error } = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => api.get<Dashboard>("/api/dashboard"),
+    queryKey: ["dashboard", currency],
+    queryFn: () => api.get<Dashboard>(`/api/dashboard?currency=${currency}`),
   });
 
   return (
     <Layout>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-          Hello, {me.name.split(" ")[0]}
-        </h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Here&apos;s your Quanta overview for today.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+            Hello, {me.name.split(" ")[0]}
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Here&apos;s your Quanta overview for today.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-gray-500">
+          Show money in
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as Currency)}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-medium text-gray-700"
+          >
+            {CURRENCIES.map((cur) => (
+              <option key={cur} value={cur}>
+                {cur}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {isLoading && (
@@ -69,11 +87,11 @@ export function DashboardPage() {
             switch (section) {
               case "bu_health":
                 return data.buHealth ? (
-                  <BuHealthSection key={section} data={data.buHealth} />
+                  <BuHealthSection key={section} data={data.buHealth} currency={currency} />
                 ) : null;
               case "account_overview":
                 return data.accountOverview ? (
-                  <AccountOverviewSection key={section} data={data.accountOverview} />
+                  <AccountOverviewSection key={section} data={data.accountOverview} currency={currency} />
                 ) : null;
               case "project_health":
                 return data.projectHealth ? (
@@ -308,7 +326,13 @@ function ProjectHealthSection({ rows }: { rows: NonNullable<Dashboard["projectHe
 // Section: account_overview — AC view
 // ═══════════════════════════════════════════════════════════════
 
-function AccountOverviewSection({ data }: { data: NonNullable<Dashboard["accountOverview"]> }) {
+function AccountOverviewSection({
+  data,
+  currency,
+}: {
+  data: NonNullable<Dashboard["accountOverview"]>;
+  currency: Currency;
+}) {
   if (data.accounts.length === 0) {
     return (
       <Card>
@@ -345,8 +369,8 @@ function AccountOverviewSection({ data }: { data: NonNullable<Dashboard["account
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
-                  <MetricInline label="Fee" value={formatMoney(totalFee)} />
-                  <MetricInline label="Cost" value={formatMoney(totalCost)} />
+                  <MetricInline label="Fee" value={formatMoney(totalFee, currency)} />
+                  <MetricInline label="Cost" value={formatMoney(totalCost, currency)} />
                   <MetricInline
                     label="Margin"
                     value={margin != null ? formatPercent(margin) : "—"}
@@ -367,7 +391,7 @@ function AccountOverviewSection({ data }: { data: NonNullable<Dashboard["account
                     <div className="text-xs text-gray-400">{p.projectCode}</div>
                   </div>
                   <div className="flex items-center gap-6 text-right text-sm tabular-nums">
-                    <span className="text-gray-600">{formatMoney(p.totalFee)}</span>
+                    <span className="text-gray-600">{formatMoney(p.totalFee, currency)}</span>
                     <span className="text-gray-500">{formatHours(p.totalActualHours)}h</span>
                     {p.marginPct != null && <Badge tone={p.marginPct >= 35 ? "emerald" : "amber"}>
                       {formatPercent(p.marginPct)}
@@ -387,7 +411,13 @@ function AccountOverviewSection({ data }: { data: NonNullable<Dashboard["account
 // Section: bu_health — BUL view
 // ═══════════════════════════════════════════════════════════════
 
-function BuHealthSection({ data }: { data: NonNullable<Dashboard["buHealth"]> }) {
+function BuHealthSection({
+  data,
+  currency,
+}: {
+  data: NonNullable<Dashboard["buHealth"]>;
+  currency: Currency;
+}) {
   const bu = data.businessUnit;
   return (
     <Card>
@@ -402,7 +432,7 @@ function BuHealthSection({ data }: { data: NonNullable<Dashboard["buHealth"]> })
           {data.revenueYtd !== undefined && (
             <Metric
               label="Revenue YTD"
-              value={formatMoney(data.revenueYtd)}
+              value={formatMoney(data.revenueYtd, currency)}
               hint={
                 data.revenueAttainmentPct != null
                   ? `${formatPercent(data.revenueAttainmentPct)} of target`
@@ -444,7 +474,7 @@ function BuHealthSection({ data }: { data: NonNullable<Dashboard["buHealth"]> })
         </div>
 
         {data.trajectory && data.trajectory.length > 0 && (
-          <BuTrajectory points={data.trajectory} />
+          <BuTrajectory currency={currency} points={data.trajectory} />
         )}
       </CardBody>
     </Card>
@@ -467,7 +497,7 @@ function monthLabel(key: string): string {
  * dashed pace lines. The money chart only appears when the API included
  * financial fields (i.e. the viewer has financial visibility).
  */
-function BuTrajectory({ points }: { points: BuHealthTrajectoryPoint[] }) {
+function BuTrajectory({ points, currency }: { points: BuHealthTrajectoryPoint[]; currency: Currency }) {
   const data = points.map((p) => ({ ...p, label: monthLabel(p.month) }));
   const hasMoney = points[0]?.revenue !== undefined;
   const compactMoney = (v: number) =>
@@ -485,7 +515,7 @@ function BuTrajectory({ points }: { points: BuHealthTrajectoryPoint[] }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#eef0f2" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#9ca3af" />
               <YAxis tick={{ fontSize: 11 }} stroke="#9ca3af" tickFormatter={compactMoney} width={48} />
-              <Tooltip formatter={(v: number | string) => formatMoney(Number(v))} />
+              <Tooltip formatter={(v: number | string) => formatMoney(Number(v), currency)} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#4f46e5" strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey="profit" name="Profit" stroke="#059669" strokeWidth={2} dot={false} />

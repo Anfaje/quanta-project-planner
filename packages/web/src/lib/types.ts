@@ -9,6 +9,8 @@
 
 export type Role = "IC" | "PM" | "AC" | "BUL" | "AA";
 
+export type Currency = "USD" | "GBP" | "DKK" | "EUR" | "CHF" | "CAD";
+
 export type ProjectStatus = "active" | "on_hold" | "complete" | "archived" | "draft";
 export type PricingModel = "time_and_materials" | "fixed_price";
 
@@ -117,6 +119,7 @@ export interface ProjectListItem {
   account: AccountLite;
   owningBu: BusinessUnitLite;
   resourceCount: number;
+  currency: Currency;
   /** Planned-hours drift vs the Initial Plan baseline (null = no baseline). */
   hoursDriftPct?: number | null;
   // Financial fields — present only if the caller can see them
@@ -167,6 +170,7 @@ export interface ProjectDetail {
     projectCode: string;
     status: ProjectStatus;
     pricingModel: PricingModel;
+    currency: Currency;
     fixedPrice: number | null;
     description: string | null;
     rejectionNote: string | null;
@@ -387,6 +391,7 @@ export interface PlatformAdminInfo {
 }
 
 export interface Dashboard {
+  displayCurrency?: Currency;
   user: {
     id: string;
     name: string;
@@ -468,6 +473,7 @@ export interface InviteCreatedResponse {
 /** GET /api/projects/:id/baseline-comparison */
 export interface BaselineComparison {
   capturedAt: string;
+  currency: Currency;
   baseline: { startDate: string; endDate: string; contingencyPct: number };
   totals: {
     baselineHours: number;
@@ -494,6 +500,7 @@ export interface BaselineComparison {
 /** GET /api/accounts/summary */
 export interface AccountsSummary {
   scope: "lifetime" | "ytd" | "rolling12";
+  displayCurrency: Currency;
   /** Non-null when the numbers are one BU's slice of each account (BUL view). */
   slice: { buCode: string } | null;
   accounts: Array<{
@@ -520,6 +527,7 @@ export interface AccountsSummary {
 /** GET /api/projects/:id/billing — fee-side offer schedule (no cost/margin). */
 export interface BillingSchedule {
   pricingModel: PricingModel;
+  currency: Currency;
   fixedPrice: number | null;
   contingencyPct: number;
   startDate: string;
