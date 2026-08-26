@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
-import type { ProjectDetail, Me } from "../lib/types";
+import type { AssignmentRow, AdminUser, ProjectDetail, Me } from "../lib/types";
 import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
 import {
@@ -14,6 +14,7 @@ import {
   Badge,
   Button,
   ConfirmModal,
+  FormInput,
   PromptModal,
   PageHeader,
   TabPanel,
@@ -58,6 +59,7 @@ export function ProjectDetailPage() {
   const { id = "" } = useParams<{ id: string }>();
   const [tab, setTab] = useState<Tab>("overview");
   const [shareOpen, setShareOpen] = useState(false);
+  const [editProjectOpen, setEditProjectOpen] = useState(false);
   const me = useMe();
   // Sharing is sourced from the BUL/AA-gated BU list, so only those roles
   // get the management control (matches TC 4.10/5.22's BUL framing).
@@ -120,6 +122,11 @@ export function ProjectDetailPage() {
         subtitle={`${p.projectCode} · ${p.account.name} · ${p.owningBu.name}`}
         actions={
           <>
+            {data.capabilities.canManage && (p.status === "active" || p.status === "on_hold") && (
+              <Button variant="secondary" size="sm" onClick={() => setEditProjectOpen(true)}>
+                Edit project
+              </Button>
+            )}
             {canShare && p.status !== "archived" && p.status !== "draft" && (
               <Button variant="secondary" size="sm" onClick={() => setShareOpen(true)}>
                 Manage sharing
@@ -134,6 +141,10 @@ export function ProjectDetailPage() {
           </>
         }
       />
+
+      {editProjectOpen && (
+        <EditProjectModal project={p} onClose={() => setEditProjectOpen(false)} />
+      )}
 
       {/* ── Meta strip ── */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
@@ -470,6 +481,27 @@ function SummaryMetrics({ data }: { data: ProjectDetail }) {
 }
 
 function OverviewTab({ data }: { data: ProjectDetail }) {
+  const qc = useQueryClient();
+  const caps = data.capabilities;
+  const canEditTeam =
+    caps.canManage && data.project.status !== "complete" && data.project.status !== "archived";
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [editingAssignment, setEditingAssignment] = useState<AssignmentRow | null>(null);
+  const [removing, setRemoving] = useState<AssignmentRow | null>(null);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const removeMut = useMutation({
+    mutationFn: (assignmentId: string) =>
+      api.delete(`/api/projects/${data.project.id}/assignments/${assignmentId}`),
+    onSuccess: () => {
+      setRemoving(null);
+      setTeamError(null);
+      qc.invalidateQueries({ queryKey: ["project", data.project.id] });
+    },
+    onError: (e: unknown) => {
+      setRemoving(null);
+      setTeamError(e instanceof Error ? e.message : "Couldn't remove this person.");
+    },
+  });
   const { assignments, project } = data;
   const isFixedPrice = project.pricingModel === "fixed_price";
 
@@ -495,8 +527,18 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                 {assignments.length} resource{assignments.length === 1 ? "" : "s"} assigned
               </p>
             </div>
+            {canEditTeam && (
+              <Button size="sm" onClick={() => setAddPersonOpen(true)}>
+                Add person
+              </Button>
+            )}
           </div>
         </CardHeader>
+        {teamError && (
+          <div className="px-6 pt-4">
+            <Alert tone="rose">{teamError}</Alert>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
@@ -505,16 +547,17 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                 <th className="text-left px-6 py-3 font-medium">Role</th>
                 <th className="text-left px-6 py-3 font-medium">BU</th>
                 {!isFixedPrice && assignments.some((a) => a.billRate !== undefined) && (
-                  <th className="text-right px-6 py-3 font-medium">Bill $/h</th>
+                  <th className="text-right px-6 py-3 font-medium">Bill /h</th>
                 )}
                 {assignments.some((a) => a.costRate !== undefined) && (
-                  <th className="text-right px-6 py-3 font-medium">Cost $/h</th>
+                  <th className="text-right px-6 py-3 font-medium">Cost /h</th>
                 )}
                 <th className="text-right px-6 py-3 font-medium">Planned</th>
                 <th className="text-right px-6 py-3 font-medium">Actual</th>
                 {!isFixedPrice && assignments.some((a) => a.plannedFee !== undefined) && (
                   <th className="text-right px-6 py-3 font-medium">Fee</th>
                 )}
+                {canEditTeam && <th className="px-6 py-3" />}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -535,12 +578,12 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                   </td>
                   {!isFixedPrice && assignments.some((x) => x.billRate !== undefined) && (
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                      {a.billRate != null ? `$${a.billRate}` : "—"}
+                      {a.billRate != null ? formatMoney(a.billRate, data.project.currency) : "—"}
                     </td>
                   )}
                   {assignments.some((x) => x.costRate !== undefined) && (
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
-                      {a.costRate != null ? `$${a.costRate}` : "—"}
+                      {a.costRate != null ? formatMoney(a.costRate, data.project.currency) : "—"}
                     </td>
                   )}
                   <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
@@ -554,12 +597,52 @@ function OverviewTab({ data }: { data: ProjectDetail }) {
                       {a.plannedFee != null ? formatMoney(a.plannedFee, data.project.currency) : "—"}
                     </td>
                   )}
+                  {canEditTeam && (
+                    <td className="px-6 py-3 text-right whitespace-nowrap">
+                      <Button variant="ghost" size="sm" onClick={() => setEditingAssignment(a)}>
+                        Edit
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setRemoving(a)}>
+                        Remove
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </Card>
+
+      {(addPersonOpen || editingAssignment) && (
+        <TeamMemberModal
+          project={data.project}
+          existing={editingAssignment}
+          onClose={() => {
+            setAddPersonOpen(false);
+            setEditingAssignment(null);
+          }}
+        />
+      )}
+      <ConfirmModal
+        open={removing != null}
+        title="Remove from the team?"
+        tone="danger"
+        message={
+          removing ? (
+            <>
+              Remove <strong>{removing.user.name}</strong> and their remaining planned hours from
+              this project? People with logged hours can&rsquo;t be removed — their history stays.
+            </>
+          ) : (
+            ""
+          )
+        }
+        confirmLabel="Remove"
+        onConfirm={() => removing && removeMut.mutate(removing.id)}
+        onCancel={() => setRemoving(null)}
+        loading={removeMut.isPending}
+      />
     </div>
   );
 }
@@ -586,6 +669,261 @@ function Metric({
       <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{label}</div>
       <div className={`text-2xl font-bold tabular-nums mt-1 ${toneClass}`}>{value}</div>
       {hint && <div className="text-xs text-gray-400 mt-0.5">{hint}</div>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Edit an in-flight project (name / description / end date / money knobs).
+// The Initial Plan baseline is never touched — changes show up as drift.
+// ═══════════════════════════════════════════════════════════════
+
+function EditProjectModal({
+  project,
+  onClose,
+}: {
+  project: ProjectDetail["project"];
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const isFixed = project.pricingModel === "fixed_price";
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+  const [endDate, setEndDate] = useState(project.endDate.slice(0, 10));
+  const [contingency, setContingency] = useState(String(Math.round(project.contingencyPct * 100)));
+  const [fixedPrice, setFixedPrice] = useState(
+    project.fixedPrice != null ? String(project.fixedPrice) : ""
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const body: Record<string, unknown> = {};
+      if (name !== project.name) body.name = name;
+      if (description !== (project.description ?? "")) body.description = description || null;
+      if (endDate !== project.endDate.slice(0, 10)) body.endDate = endDate;
+      if (!isFixed) {
+        const pct = Number(contingency) / 100;
+        if (!Number.isNaN(pct) && Math.abs(pct - project.contingencyPct) > 1e-9) {
+          body.contingencyPct = pct;
+        }
+      } else {
+        const fp = Number(fixedPrice);
+        if (!Number.isNaN(fp) && fp !== (project.fixedPrice ?? 0)) body.fixedPrice = fp;
+      }
+      if (Object.keys(body).length === 0) return Promise.resolve(null);
+      return api.patch(`/api/projects/${project.id}`, body);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project", project.id] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      onClose();
+    },
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : "Couldn't save changes."),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4">
+      <div className="w-full max-w-lg rounded-xl bg-white shadow-xl p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">Edit project</h2>
+        <p className="text-xs text-gray-500 mb-5">
+          Changes apply to the live plan and roll into every metric immediately. The Initial Plan
+          baseline stays fixed — differences appear on the Baseline drift tab.
+        </p>
+
+        {error && (
+          <div className="mb-4">
+            <Alert tone="rose">{error}</Alert>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <FormInput label="Project name" value={name} onChange={setName} />
+          <FormInput
+            label="Description"
+            value={description}
+            onChange={setDescription}
+            placeholder="Optional"
+          />
+          <FormInput
+            label="End date"
+            type="date"
+            value={endDate}
+            onChange={setEndDate}
+            hint="Extending adds empty plan weeks for everyone; shortening requires the dropped weeks to be empty and unlocked. The start date is locked once active."
+          />
+          {isFixed ? (
+            <FormInput
+              label={`Contract value (${project.currency})`}
+              type="number"
+              value={fixedPrice}
+              onChange={setFixedPrice}
+            />
+          ) : (
+            <FormInput
+              label="Contingency (%)"
+              type="number"
+              value={contingency}
+              onChange={setContingency}
+              hint="Applied on top of the planned fee in offers and financials."
+            />
+          )}
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => mutation.mutate()} loading={mutation.isPending}>
+            Save changes
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Add a person to the team, or edit an existing assignment's role/rates.
+// ═══════════════════════════════════════════════════════════════
+
+function TeamMemberModal({
+  project,
+  existing,
+  onClose,
+}: {
+  project: ProjectDetail["project"];
+  existing: AssignmentRow | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const isFixed = project.pricingModel === "fixed_price";
+  const [userId, setUserId] = useState(existing?.userId ?? "");
+  const [projectRole, setProjectRole] = useState(existing?.projectRole ?? "");
+  const [billRate, setBillRate] = useState(
+    existing?.billRate != null ? String(existing.billRate) : ""
+  );
+  const [costRate, setCostRate] = useState(
+    existing?.costRate != null ? String(existing.costRate) : ""
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const usersQ = useQuery({
+    queryKey: ["admin", "users"],
+    queryFn: () => api.get<{ users: AdminUser[] }>("/api/admin/users"),
+    enabled: existing == null,
+  });
+  const candidates = (usersQ.data?.users ?? []).filter((u) => u.status !== "deactivated");
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      if (existing) {
+        const body: Record<string, unknown> = { projectRole };
+        if (!isFixed && billRate !== "") body.billRate = Number(billRate);
+        if (costRate !== "") body.costRate = Number(costRate);
+        return api.patch(`/api/projects/${project.id}/assignments/${existing.id}`, body);
+      }
+      const body: Record<string, unknown> = {
+        userId,
+        projectRole,
+        costRate: Number(costRate || 0),
+      };
+      if (!isFixed) body.billRate = Number(billRate || 0);
+      return api.post(`/api/projects/${project.id}/assignments`, body);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project", project.id] });
+      onClose();
+    },
+    onError: (e: unknown) => setError(e instanceof Error ? e.message : "Couldn't save."),
+  });
+
+  const selected = candidates.find((u) => u.id === userId);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4">
+      <div className="w-full max-w-lg rounded-xl bg-white shadow-xl p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-lg font-semibold text-gray-900 mb-1">
+          {existing ? `Edit ${existing.user.name}` : "Add person"}
+        </h2>
+        <p className="text-xs text-gray-500 mb-5">
+          {existing
+            ? "Rate changes reprice this project's history and future — margins recompute from the current rates."
+            : "New people get empty plan weeks across the timeline; set their hours in the Hours grid afterwards."}
+        </p>
+
+        {error && (
+          <div className="mb-4">
+            <Alert tone="rose">{error}</Alert>
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {!existing && (
+            <div>
+              <div className="text-sm font-medium text-gray-700 mb-1">Person</div>
+              <select
+                value={userId}
+                onChange={(e) => {
+                  setUserId(e.target.value);
+                  const u = candidates.find((x) => x.id === e.target.value);
+                  if (u && !projectRole && u.projectRoles.length > 0) {
+                    setProjectRole(u.projectRoles[0]);
+                  }
+                }}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white"
+              >
+                <option value="">Select a person…</option>
+                {candidates.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.primaryBu?.code ?? "—"}
+                    {u.status === "pending" ? " · invited" : ""})
+                  </option>
+                ))}
+              </select>
+              {selected?.status === "pending" && (
+                <p className="mt-1 text-xs text-amber-600">
+                  Invited but not yet active — they can be planned now and will see the project
+                  once they accept.
+                </p>
+              )}
+            </div>
+          )}
+          <FormInput
+            label="Project role"
+            value={projectRole}
+            onChange={setProjectRole}
+            placeholder="e.g. Backend Dev"
+          />
+          {!isFixed && (
+            <FormInput
+              label={`Bill rate (${project.currency}/h)`}
+              type="number"
+              value={billRate}
+              onChange={setBillRate}
+            />
+          )}
+          <FormInput
+            label={`Cost rate (${project.currency}/h)`}
+            type="number"
+            value={costRate}
+            onChange={setCostRate}
+          />
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => mutation.mutate()}
+            loading={mutation.isPending}
+            disabled={(!existing && !userId) || !projectRole}
+          >
+            {existing ? "Save changes" : "Add to team"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -487,6 +487,125 @@ describe("POST /api/projects", () => {
     expect(d2.body.project.currency).toBe("USD");
   });
 
+  it("editing an active project: timeline resizes the grid, history is guarded, metrics follow current", async () => {
+    const { pm, body, bu } = await basePayload(prisma);
+    const pmAgent = await authenticateAs(app, pm.email);
+    const created = await pmAgent
+      .post("/api/projects")
+      .send({
+        ...body,
+        plannedHours: [{ userId: pm.id, projectWeek: 0, plannedHours: 20 }],
+      })
+      .expect(201);
+    const projectId = created.body.projectId;
+    const aaAgent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    expect((await aaAgent.post(`/api/projects/${projectId}/approve`)).status).toBeLessThan(300);
+
+    const before = await prisma.project.findUnique({ where: { id: projectId } });
+    const assignment0 = await prisma.resourceAssignment.findFirst({ where: { projectId } });
+    const oldTotal = await prisma.hourEntry.count({ where: { assignmentId: assignment0!.id } });
+
+    // startDate is locked once active.
+    const startTry = await pmAgent
+      .patch(`/api/projects/${projectId}`)
+      .send({ startDate: "2030-01-06" });
+    expect(startTry.status).toBe(409);
+
+    // Extend the end date by two weeks: every assignment gains empty entries.
+    const newEnd = new Date(before!.endDate.getTime() + 14 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    await pmAgent.patch(`/api/projects/${projectId}`).send({ endDate: newEnd }).expect(200);
+    const assignment = assignment0!;
+    const entryCount = await prisma.hourEntry.count({ where: { assignmentId: assignment.id } });
+    expect(entryCount).toBe(oldTotal + 2);
+
+    // Log hours in the final (new) week, then try to shrink past it: guarded.
+    const lastWeek = entryCount - 1;
+    await prisma.hourEntry.updateMany({
+      where: { assignmentId: assignment.id, projectWeek: lastWeek },
+      data: { actualHours: 5 },
+    });
+    const shrink = await pmAgent
+      .patch(`/api/projects/${projectId}`)
+      .send({ endDate: before!.endDate.toISOString().slice(0, 10) });
+    expect(shrink.status).toBe(409);
+
+    // Clear it, and the same shrink succeeds — dropped weeks are deleted.
+    await prisma.hourEntry.updateMany({
+      where: { assignmentId: assignment.id, projectWeek: lastWeek },
+      data: { actualHours: null },
+    });
+    await pmAgent
+      .patch(`/api/projects/${projectId}`)
+      .send({ endDate: before!.endDate.toISOString().slice(0, 10) })
+      .expect(200);
+    expect(await prisma.hourEntry.count({ where: { assignmentId: assignment.id } })).toBe(
+      oldTotal
+    );
+
+    // Rate change reprices CURRENT metrics; the baseline stays initial.
+    // (Plan management is a PM/BUL capability — AAs administer, managers manage.)
+    await pmAgent
+      .patch(`/api/projects/${projectId}/assignments/${assignment.id}`)
+      .send({ billRate: 400 })
+      .expect(200);
+    const detail = await aaAgent.get(`/api/projects/${projectId}`).expect(200);
+    const drift = await aaAgent
+      .get(`/api/projects/${projectId}/baseline-comparison`)
+      .expect(200);
+    // Doubling the bill rate exactly doubles the current plan's fee relative
+    // to the frozen baseline (hours and contingency cancel out), and the
+    // detail's live metrics move with it.
+    expect(drift.body.totals.currentFee / drift.body.totals.baselineFee).toBeCloseTo(2, 5);
+    expect(detail.body.financials.totalFee).toBeGreaterThan(drift.body.totals.baselineFee);
+  });
+
+  it("team changes on an active project: add freely, remove only without logged history", async () => {
+    const { pm, body, bu } = await basePayload(prisma);
+    const pmAgent = await authenticateAs(app, pm.email);
+    const created = await pmAgent
+      .post("/api/projects")
+      .send({
+        ...body,
+        plannedHours: [{ userId: pm.id, projectWeek: 0, plannedHours: 10 }],
+      })
+      .expect(201);
+    const projectId = created.body.projectId;
+    const aaAgent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+    expect((await aaAgent.post(`/api/projects/${projectId}/approve`)).status).toBeLessThan(300);
+
+    // Add a person to the running project.
+    const extra = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    const add = await pmAgent
+      .post(`/api/projects/${projectId}/assignments`)
+      .send({ userId: extra.id, projectRole: "Backend", billRate: 150, costRate: 80 });
+    expect(add.status).toBeLessThan(300);
+    const added = await prisma.resourceAssignment.findFirst({
+      where: { projectId, userId: extra.id },
+    });
+    expect(added).not.toBeNull();
+
+    // No logged hours → removable.
+    await pmAgent.delete(`/api/projects/${projectId}/assignments/${added!.id}`).expect(200);
+
+    // The PM has logged hours → protected.
+    const pmAssignment = await prisma.resourceAssignment.findFirst({
+      where: { projectId, userId: pm.id },
+    });
+    await prisma.hourEntry.updateMany({
+      where: { assignmentId: pmAssignment!.id, projectWeek: 0 },
+      data: { actualHours: 8 },
+    });
+    const blocked = await pmAgent.delete(
+      `/api/projects/${projectId}/assignments/${pmAssignment!.id}`
+    );
+    expect(blocked.status).toBe(409);
+    expect(
+      await prisma.resourceAssignment.findUnique({ where: { id: pmAssignment!.id } })
+    ).not.toBeNull();
+  });
+
   it("PUT /:id 409s on a non-draft project", async () => {
     const bu = await getDefaultBu(prisma);
     const account = await getDefaultAccount(prisma);
