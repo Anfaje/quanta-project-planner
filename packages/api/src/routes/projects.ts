@@ -1307,11 +1307,13 @@ router.patch("/:id", async (req: Request, res: Response) => {
     }
     const proj = await prisma.project.findUnique({
       where: { id: ctx.id },
-      select: { totalWeeks: true, assignments: { select: { id: true } } },
+      select: { assignments: { select: { id: true } } },
     });
+    // totalWeeks is derived, not stored — compute both sides.
+    const oldTotal = countProjectWeeks(ctx.startDate, ctx.endDate);
     const newTotal = countProjectWeeks(gridStart, gridEnd);
-    if (proj && newTotal !== proj.totalWeeks) {
-      if (newTotal < proj.totalWeeks) {
+    if (proj && newTotal !== oldTotal) {
+      if (newTotal < oldTotal) {
         const blocked = await prisma.hourEntry.findFirst({
           where: {
             assignment: { projectId: ctx.id },
@@ -1329,14 +1331,13 @@ router.patch("/:id", async (req: Request, res: Response) => {
       }
       weekResize = {
         newTotal,
-        oldTotal: proj.totalWeeks,
+        oldTotal,
         assignmentIds: proj.assignments.map((a) => a.id),
         gridStart,
       };
-      updateData.totalWeeks = newTotal;
       changes.push({
         field: "total_weeks",
-        oldValue: String(proj.totalWeeks),
+        oldValue: String(oldTotal),
         newValue: String(newTotal),
       });
     }

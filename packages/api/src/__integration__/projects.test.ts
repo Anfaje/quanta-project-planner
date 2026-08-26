@@ -502,7 +502,8 @@ describe("POST /api/projects", () => {
     expect((await aaAgent.post(`/api/projects/${projectId}/approve`)).status).toBeLessThan(300);
 
     const before = await prisma.project.findUnique({ where: { id: projectId } });
-    const oldTotal = before!.totalWeeks;
+    const assignment0 = await prisma.resourceAssignment.findFirst({ where: { projectId } });
+    const oldTotal = await prisma.hourEntry.count({ where: { assignmentId: assignment0!.id } });
 
     // startDate is locked once active.
     const startTry = await pmAgent
@@ -515,16 +516,14 @@ describe("POST /api/projects", () => {
       .toISOString()
       .slice(0, 10);
     await pmAgent.patch(`/api/projects/${projectId}`).send({ endDate: newEnd }).expect(200);
-    const after = await prisma.project.findUnique({ where: { id: projectId } });
-    expect(after!.totalWeeks).toBeGreaterThan(oldTotal);
-    const assignment = await prisma.resourceAssignment.findFirst({ where: { projectId } });
-    const entryCount = await prisma.hourEntry.count({ where: { assignmentId: assignment!.id } });
-    expect(entryCount).toBe(after!.totalWeeks);
+    const assignment = assignment0!;
+    const entryCount = await prisma.hourEntry.count({ where: { assignmentId: assignment.id } });
+    expect(entryCount).toBe(oldTotal + 2);
 
     // Log hours in the final (new) week, then try to shrink past it: guarded.
-    const lastWeek = after!.totalWeeks - 1;
+    const lastWeek = entryCount - 1;
     await prisma.hourEntry.updateMany({
-      where: { assignmentId: assignment!.id, projectWeek: lastWeek },
+      where: { assignmentId: assignment.id, projectWeek: lastWeek },
       data: { actualHours: 5 },
     });
     const shrink = await pmAgent
@@ -534,20 +533,20 @@ describe("POST /api/projects", () => {
 
     // Clear it, and the same shrink succeeds — dropped weeks are deleted.
     await prisma.hourEntry.updateMany({
-      where: { assignmentId: assignment!.id, projectWeek: lastWeek },
+      where: { assignmentId: assignment.id, projectWeek: lastWeek },
       data: { actualHours: null },
     });
     await pmAgent
       .patch(`/api/projects/${projectId}`)
       .send({ endDate: before!.endDate.toISOString().slice(0, 10) })
       .expect(200);
-    expect(await prisma.hourEntry.count({ where: { assignmentId: assignment!.id } })).toBe(
+    expect(await prisma.hourEntry.count({ where: { assignmentId: assignment.id } })).toBe(
       oldTotal
     );
 
     // Rate change reprices CURRENT metrics; the baseline stays initial.
     await aaAgent
-      .patch(`/api/projects/${projectId}/assignments/${assignment!.id}`)
+      .patch(`/api/projects/${projectId}/assignments/${assignment.id}`)
       .send({ billRate: 400 })
       .expect(200);
     const detail = await aaAgent.get(`/api/projects/${projectId}`).expect(200);
