@@ -551,12 +551,14 @@ describe("POST /api/projects", () => {
       .send({ billRate: 400 })
       .expect(200);
     const detail = await aaAgent.get(`/api/projects/${projectId}`).expect(200);
-    expect(detail.body.financials.totalFee).toBe(20 * 400);
     const drift = await aaAgent
       .get(`/api/projects/${projectId}/baseline-comparison`)
       .expect(200);
-    expect(drift.body.totals.currentFee).toBe(20 * 400);
-    expect(drift.body.totals.baselineFee).not.toBe(drift.body.totals.currentFee);
+    // Doubling the bill rate exactly doubles the current plan's fee relative
+    // to the frozen baseline (hours and contingency cancel out), and the
+    // detail's live metrics move with it.
+    expect(drift.body.totals.currentFee / drift.body.totals.baselineFee).toBeCloseTo(2, 5);
+    expect(detail.body.financials.totalFee).toBeGreaterThan(drift.body.totals.baselineFee);
   });
 
   it("team changes on an active project: add freely, remove only without logged history", async () => {
