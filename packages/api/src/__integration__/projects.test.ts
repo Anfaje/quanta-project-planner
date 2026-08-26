@@ -545,7 +545,8 @@ describe("POST /api/projects", () => {
     );
 
     // Rate change reprices CURRENT metrics; the baseline stays initial.
-    await aaAgent
+    // (Plan management is a PM/BUL capability — AAs administer, managers manage.)
+    await pmAgent
       .patch(`/api/projects/${projectId}/assignments/${assignment.id}`)
       .send({ billRate: 400 })
       .expect(200);
