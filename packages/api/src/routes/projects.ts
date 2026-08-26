@@ -1274,6 +1274,73 @@ router.patch("/:id", async (req: Request, res: Response) => {
       newValue: data.endDate,
     });
   }
+
+  // ── Timeline changes resize the week grid ────────────────────────────
+  // startDate anchors every logged week's calendar date, so it is locked
+  // once a project has left draft (adjust the end date, or revise drafts in
+  // the wizard). endDate changes grow or shrink the grid: new weeks get
+  // empty entries for every assignment; dropped weeks must be empty and
+  // unlocked.
+  if (ctx.status !== "draft" && data.startDate !== undefined) {
+    if (data.startDate !== ctx.startDate.toISOString().slice(0, 10)) {
+      return res.status(409).json({
+        error:
+          "The start date is locked once a project is active — it anchors logged weeks. Adjust the end date instead.",
+      });
+    }
+  }
+
+  let weekResize: {
+    newTotal: number;
+    oldTotal: number;
+    assignmentIds: string[];
+    gridStart: Date;
+  } | null = null;
+  if (data.endDate !== undefined || (ctx.status === "draft" && data.startDate !== undefined)) {
+    const gridStart =
+      ctx.status === "draft" && data.startDate !== undefined
+        ? new Date(data.startDate + "T00:00:00Z")
+        : ctx.startDate;
+    const gridEnd = data.endDate !== undefined ? new Date(data.endDate + "T00:00:00Z") : ctx.endDate;
+    if (gridEnd < gridStart) {
+      return res.status(400).json({ error: "The end date must be after the start date" });
+    }
+    const proj = await prisma.project.findUnique({
+      where: { id: ctx.id },
+      select: { totalWeeks: true, assignments: { select: { id: true } } },
+    });
+    const newTotal = countProjectWeeks(gridStart, gridEnd);
+    if (proj && newTotal !== proj.totalWeeks) {
+      if (newTotal < proj.totalWeeks) {
+        const blocked = await prisma.hourEntry.findFirst({
+          where: {
+            assignment: { projectId: ctx.id },
+            projectWeek: { gte: newTotal },
+            OR: [{ actualHours: { gt: 0 } }, { locked: true }],
+          },
+          select: { projectWeek: true },
+          orderBy: { projectWeek: "asc" },
+        });
+        if (blocked) {
+          return res.status(409).json({
+            error: `Can't shorten the timeline: week ${blocked.projectWeek + 1} has logged or locked hours. Clear or unlock the affected weeks first.`,
+          });
+        }
+      }
+      weekResize = {
+        newTotal,
+        oldTotal: proj.totalWeeks,
+        assignmentIds: proj.assignments.map((a) => a.id),
+        gridStart,
+      };
+      updateData.totalWeeks = newTotal;
+      changes.push({
+        field: "total_weeks",
+        oldValue: String(proj.totalWeeks),
+        newValue: String(newTotal),
+      });
+    }
+  }
   if (data.contingencyPct !== undefined) {
     updateData.contingencyPct = new Prisma.Decimal(data.contingencyPct);
     changes.push({
@@ -1300,6 +1367,34 @@ router.patch("/:id", async (req: Request, res: Response) => {
   }
 
   await prisma.project.update({ where: { id: ctx.id }, data: updateData });
+
+  if (weekResize) {
+    if (weekResize.newTotal < weekResize.oldTotal) {
+      await prisma.hourEntry.deleteMany({
+        where: { assignment: { projectId: ctx.id }, projectWeek: { gte: weekResize.newTotal } },
+      });
+    } else {
+      const rows: {
+        assignmentId: string;
+        projectWeek: number;
+        weekStartDate: Date;
+        locked: boolean;
+      }[] = [];
+      for (const assignmentId of weekResize.assignmentIds) {
+        for (let w = weekResize.oldTotal; w < weekResize.newTotal; w++) {
+          rows.push({
+            assignmentId,
+            projectWeek: w,
+            weekStartDate: weekStartDate(weekResize.gridStart, w),
+            locked: false,
+          });
+        }
+      }
+      if (rows.length > 0) {
+        await prisma.hourEntry.createMany({ data: rows, skipDuplicates: true });
+      }
+    }
+  }
   await logChanges("Project", ctx.id, user.id, changes);
 
   logger.info({ projectId: ctx.id, actor: user.id, changes: changes.map((c) => c.field) }, "Project updated");
@@ -1591,6 +1686,19 @@ router.delete("/:id/assignments/:assignmentId", async (req: Request, res: Respon
   });
   if (!existing || existing.projectId !== ctx.id) {
     return res.status(404).json({ error: "Assignment not found" });
+  }
+
+  // Never destroy logged history: an assignment with actual hours can't be
+  // deleted — zero out its remaining planned hours instead (the person stays
+  // on the record; drift shows the de-scope).
+  const loggedWeeks = await prisma.hourEntry.count({
+    where: { assignmentId: existing.id, actualHours: { gt: 0 } },
+  });
+  if (loggedWeeks > 0) {
+    return res.status(409).json({
+      error:
+        "This person has logged hours on the project. Zero out their remaining planned hours instead of removing them — logged history stays intact.",
+    });
   }
 
   await prisma.resourceAssignment.delete({ where: { id: existing.id } });
