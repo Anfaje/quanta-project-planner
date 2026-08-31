@@ -364,8 +364,21 @@ router.get("/:id", async (req: Request, res: Response) => {
     select: { capturedAt: true },
   });
 
+  const capCtx = {
+    projectId: project.id,
+    projectAccountId: (project as { accountId?: string }).accountId,
+    projectOwningBuId: project.owningBuId,
+    projectSharedBuIds: (project as { shares?: { sharedWithBuId: string }[] }).shares?.map(
+      (s) => s.sharedWithBuId
+    ),
+  };
   const isApprover =
-    project.status === "draft" && canApproveDraft(user, { owningBuId: project.owningBuId });
+    project.status === "draft" &&
+    canApproveDraft(user, {
+      owningBuId: project.owningBuId,
+      accountId: capCtx.projectAccountId,
+      projectId: project.id,
+    });
 
   res.json({
     project: {
@@ -412,12 +425,12 @@ router.get("/:id", async (req: Request, res: Response) => {
         }
       : {}),
     capabilities: {
-      canManage: canManageProject(user),
-      canManagePlan: canManagePlan(user) && !isPlanLocked(project.status),
-      canLockWeeks: canLockWeeks(user),
+      canManage: canManageProject(user, capCtx),
+      canManagePlan: canManagePlan(user, capCtx) && !isPlanLocked(project.status),
+      canLockWeeks: canLockWeeks(user, capCtx),
       isDraft: project.status === "draft",
       canApproveDraft: isApprover,
-      canViewBilling: canViewBillRates(user),
+      canViewBilling: canViewBillRates(user, capCtx),
       canManageReviewers:
         project.status === "draft" &&
         (project.createdById === user.id || user.roles.includes(Role.AA)),
@@ -708,11 +721,11 @@ router.get("/:id/baseline-comparison", async (req: Request, res: Response) => {
  */
 router.get("/:id/billing", async (req: Request, res: Response) => {
   const user = req.authUser!;
-  if (!canViewBillRates(user)) {
-    return res.status(403).json({ error: "Bill-rate visibility is required for the billing schedule" });
-  }
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
+  if (!canViewBillRates(user, ctx.ctx)) {
+    return res.status(403).json({ error: "Bill-rate visibility is required for the billing schedule" });
+  }
   if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds })) {
     return res.status(403).json({ error: "No access to this project" });
   }
@@ -859,7 +872,7 @@ router.put("/:id", async (req: Request, res: Response) => {
   if (
     !isDraftOwner &&
     (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user))
+      !canManageProject(user, ctx.ctx))
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
@@ -1061,6 +1074,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
       owningBuId: true,
       createdById: true,
       projectCode: true,
+      accountId: true,
       account: { select: { isActive: true } },
       owningBu: { select: { isActive: true } },
       assignments: { select: { user: { select: { isActive: true } } } },
@@ -1070,7 +1084,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
   if (project.status !== "draft") {
     return res.status(409).json({ error: "Only draft projects can be approved" });
   }
-  if (!canApproveDraft(user, { owningBuId: project.owningBuId })) {
+  if (!canApproveDraft(user, { owningBuId: project.owningBuId, accountId: (project as { accountId?: string }).accountId, projectId: project.id })) {
     return res.status(403).json({ error: "You do not have approval rights for this draft" });
   }
 
@@ -1130,7 +1144,7 @@ router.post("/:id/reject", async (req: Request, res: Response) => {
   if (project.status !== "draft") {
     return res.status(409).json({ error: "Only draft projects can be rejected" });
   }
-  if (!canApproveDraft(user, { owningBuId: project.owningBuId })) {
+  if (!canApproveDraft(user, { owningBuId: project.owningBuId, accountId: (project as { accountId?: string }).accountId, projectId: project.id })) {
     return res.status(403).json({ error: "You do not have approval rights for this draft" });
   }
 
@@ -1200,7 +1214,7 @@ router.patch("/:id", async (req: Request, res: Response) => {
   if (
     !isDraftOwner &&
     (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user))
+      !canManageProject(user, ctx.ctx))
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
@@ -1412,7 +1426,7 @@ router.post("/:id/archive", async (req: Request, res: Response) => {
   if (!ctx) return res.status(404).json({ error: "Project not found" });
 
   if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user)) {
+      !canManageProject(user, ctx.ctx)) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
   if (ctx.status === "archived") {
@@ -1447,7 +1461,7 @@ router.post("/:id/share", async (req: Request, res: Response) => {
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
   if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user)) {
+      !canManageProject(user, ctx.ctx)) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
   if (ctx.status === "archived") return res.status(409).json({ error: "Project is archived" });
@@ -1487,7 +1501,7 @@ router.delete("/:id/share/:buId", async (req: Request, res: Response) => {
   const ctx = await loadProjectContext(prisma, req.params.id);
   if (!ctx) return res.status(404).json({ error: "Project not found" });
   if (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user)) {
+      !canManageProject(user, ctx.ctx)) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
 
@@ -1526,7 +1540,7 @@ router.post("/:id/assignments", async (req: Request, res: Response) => {
   if (
     !isDraftOwner &&
     (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user))
+      !canManageProject(user, ctx.ctx))
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
@@ -1615,7 +1629,7 @@ router.patch("/:id/assignments/:assignmentId", async (req: Request, res: Respons
   if (
     !isDraftOwner &&
     (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user))
+      !canManageProject(user, ctx.ctx))
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }
@@ -1676,7 +1690,7 @@ router.delete("/:id/assignments/:assignmentId", async (req: Request, res: Respon
   if (
     !isDraftOwner &&
     (!canAccessProject(user, { ...ctx.ctx, assignedUserIds: ctx.assignedUserIds }) ||
-      !canManageProject(user))
+      !canManageProject(user, ctx.ctx))
   ) {
     return res.status(403).json({ error: "Cannot manage this project" });
   }

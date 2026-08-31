@@ -14,6 +14,7 @@ export async function loadAuthUser(req: Request, _res: Response, next: NextFunct
         where: { id: req.session.userId },
         include: {
           managedAccounts: { select: { accountId: true } },
+          permissionGrants: { select: { permission: true, scopeType: true, scopeId: true } },
         },
       });
 
@@ -28,6 +29,7 @@ export async function loadAuthUser(req: Request, _res: Response, next: NextFunct
           financialAccess: user.financialAccess,
           isActive: user.isActive,
           managedAccountIds: user.managedAccounts.map((m) => m.accountId),
+          grants: user.permissionGrants,
         };
       }
     }

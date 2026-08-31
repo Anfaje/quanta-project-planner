@@ -1,4 +1,4 @@
-import { Role } from "@prisma/client";
+import { Permission, GrantScope, Role } from "@prisma/client";
 
 // Extend Express session with our user data
 declare module "express-session" {
@@ -20,6 +20,14 @@ export interface AuthUser {
   financialAccess: boolean;
   isActive: boolean;
   managedAccountIds: string[];   // populated for AC role holders
+  /** Scoped permission grants (additive overlay on role capabilities). */
+  grants: UserGrant[];
+}
+
+export interface UserGrant {
+  permission: Permission;
+  scopeType: GrantScope;
+  scopeId: string | null;
 }
 
 // Extend Express Request

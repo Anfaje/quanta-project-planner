@@ -1,10 +1,10 @@
 import { Router, Request, Response } from "express";
 import { randomBytes } from "crypto";
-import { Role } from "@prisma/client";
+import { Role, GrantScope, Permission, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
 import { requireAuth, requireRoles } from "../middleware/auth";
-import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema, updateMeSchema } from "../utils/validation";
+import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema, updateMeSchema, permissionGrantsSchema } from "../utils/validation";
 import { logChanges, diffFields } from "../services/auditLog";
 import { captureBaseline } from "../services/planBaseline";
 
@@ -762,6 +762,207 @@ router.post("/backfill-baselines", requireRoles(Role.AA), async (req: Request, r
     created += 1;
   }
   res.json({ scanned: projects.length, created });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PERMISSION GRANTS (scoped overlay on role presets)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * The BUs an editor may administer grants within: their own BU if they're a
+ * BUL, plus any BU where they hold a manage_users grant. AAs bypass this and
+ * edit anyone, anywhere.
+ */
+function grantEditorReach(user: {
+  roles: Role[];
+  primaryBuId: string;
+  grants?: { permission: Permission; scopeType: GrantScope; scopeId: string | null }[];
+}): Set<string> {
+  const reach = new Set<string>();
+  if (user.roles.includes(Role.BUL)) reach.add(user.primaryBuId);
+  for (const g of user.grants ?? []) {
+    if (
+      g.permission === Permission.manage_users &&
+      g.scopeType === GrantScope.business_unit &&
+      g.scopeId != null
+    ) {
+      reach.add(g.scopeId);
+    }
+  }
+  return reach;
+}
+
+/**
+ * GET /api/admin/users/:id/permissions
+ * The target's roles (presets) and explicit grants. Readable by AA, or by an
+ * editor whose reach covers the target's BU (BUL / manage_users grantee) for
+ * non-AA targets.
+ */
+router.get("/users/:id/permissions", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const target = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      roles: true,
+      primaryBuId: true,
+      permissionGrants: {
+        select: { id: true, permission: true, scopeType: true, scopeId: true },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  const isAa = user.roles.includes(Role.AA);
+  const reach = grantEditorReach(user);
+  if (!isAa && !(reach.has(target.primaryBuId) && !target.roles.includes(Role.AA))) {
+    return res.status(403).json({ error: "Cannot view this user's permissions" });
+  }
+  res.json({ roles: target.roles, grants: target.permissionGrants });
+});
+
+/**
+ * PUT /api/admin/users/:id/permissions
+ * Replace the target's explicit grants.
+ *
+ * Rules (the meta-permission, kept as legible as the invite ceiling):
+ *   - Additive model invariants for everyone: platform scope carries no
+ *     scopeId; other scopes require one and it must exist; manage_users
+ *     exists ONLY at business_unit scope (platform-wide user admin stays
+ *     exclusive to the AA role — a toggle for it would be an escalation
+ *     hole with a bow on it).
+ *   - AA: full replace of any user's grants.
+ *   - BUL / manage_users grantee: target must be a non-AA user in a BU
+ *     within reach; grants may only be scoped to a reach BU or to projects
+ *     owned by a reach BU (accounts span BUs, so account rows are AA-only);
+ *     replace semantics apply within reach — grants outside it are untouched.
+ */
+router.put("/users/:id/permissions", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const parsed = permissionGrantsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+  const incoming = parsed.data.grants.map((g) => ({
+    permission: g.permission as Permission,
+    scopeType: g.scopeType as GrantScope,
+    scopeId: g.scopeId ?? null,
+  }));
+
+  const target = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      roles: true,
+      primaryBuId: true,
+      permissionGrants: { select: { id: true, permission: true, scopeType: true, scopeId: true } },
+    },
+  });
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  // ── Shape invariants (everyone) ──
+  for (const g of incoming) {
+    if (g.scopeType === GrantScope.platform && g.scopeId != null) {
+      return res.status(400).json({ error: "Platform-scope grants carry no scopeId" });
+    }
+    if (g.scopeType !== GrantScope.platform && g.scopeId == null) {
+      return res.status(400).json({ error: `${g.scopeType} grants require a scopeId` });
+    }
+    if (g.permission === Permission.manage_users && g.scopeType !== GrantScope.business_unit) {
+      return res.status(400).json({
+        error: "manage_users is only grantable at business-unit scope",
+      });
+    }
+  }
+
+  // ── Referenced entities must exist ──
+  const buIds = [...new Set(incoming.filter((g) => g.scopeType === GrantScope.business_unit).map((g) => g.scopeId as string))];
+  const accountIds = [...new Set(incoming.filter((g) => g.scopeType === GrantScope.account).map((g) => g.scopeId as string))];
+  const projectIds = [...new Set(incoming.filter((g) => g.scopeType === GrantScope.project).map((g) => g.scopeId as string))];
+  const [bus, accounts, projects] = await Promise.all([
+    buIds.length ? prisma.businessUnit.findMany({ where: { id: { in: buIds } }, select: { id: true } }) : [],
+    accountIds.length ? prisma.account.findMany({ where: { id: { in: accountIds } }, select: { id: true } }) : [],
+    projectIds.length ? prisma.project.findMany({ where: { id: { in: projectIds } }, select: { id: true, owningBuId: true } }) : [],
+  ]);
+  if (bus.length !== buIds.length || accounts.length !== accountIds.length || projects.length !== projectIds.length) {
+    return res.status(400).json({ error: "One or more grant scopes reference unknown entities" });
+  }
+  const projectBu = new Map(projects.map((pr) => [pr.id, pr.owningBuId]));
+
+  const isAa = user.roles.includes(Role.AA);
+  let removeWhere: Prisma.PermissionGrantWhereInput;
+  let toInsert = incoming;
+
+  if (isAa) {
+    removeWhere = { userId: target.id };
+  } else {
+    const reach = grantEditorReach(user);
+    if (reach.size === 0) {
+      return res.status(403).json({ error: "Cannot edit permissions" });
+    }
+    if (!reach.has(target.primaryBuId) || target.roles.includes(Role.AA)) {
+      return res.status(403).json({ error: "Target is outside your administration reach" });
+    }
+    for (const g of incoming) {
+      const ok =
+        (g.scopeType === GrantScope.business_unit && reach.has(g.scopeId as string)) ||
+        (g.scopeType === GrantScope.project && reach.has(projectBu.get(g.scopeId as string) ?? ""));
+      if (!ok) {
+        return res.status(403).json({
+          error:
+            "You can only grant within your own business unit(s) and their projects — account and platform scopes are AA-only",
+        });
+      }
+    }
+    // Replace-within-reach: drop the target's grants that this editor could
+    // have created, leave everything else intact.
+    const reachIds = [...reach];
+    const targetProjectGrantIds = target.permissionGrants
+      .filter((g) => g.scopeType === GrantScope.project && g.scopeId != null)
+      .map((g) => g.scopeId as string);
+    const reachProjects = targetProjectGrantIds.length
+      ? await prisma.project.findMany({
+          where: { id: { in: targetProjectGrantIds }, owningBuId: { in: reachIds } },
+          select: { id: true },
+        })
+      : [];
+    removeWhere = {
+      userId: target.id,
+      OR: [
+        { scopeType: GrantScope.business_unit, scopeId: { in: reachIds } },
+        { scopeType: GrantScope.project, scopeId: { in: reachProjects.map((pr) => pr.id) } },
+      ],
+    };
+    toInsert = incoming;
+  }
+
+  const before = target.permissionGrants.length;
+  await prisma.$transaction(async (tx) => {
+    await tx.permissionGrant.deleteMany({ where: removeWhere });
+    if (toInsert.length > 0) {
+      await tx.permissionGrant.createMany({
+        data: toInsert.map((g) => ({ ...g, userId: target.id, grantedBy: user.id })),
+        skipDuplicates: true,
+      });
+    }
+  });
+
+  await logChanges("User", target.id, user.id, [
+    {
+      field: "permission_grants",
+      oldValue: `${before} grant(s)`,
+      newValue: JSON.stringify(toInsert).slice(0, 1900),
+    },
+  ]);
+  logger.info({ targetId: target.id, actor: user.id, grants: toInsert.length }, "Permission grants replaced");
+
+  const fresh = await prisma.permissionGrant.findMany({
+    where: { userId: target.id },
+    select: { id: true, permission: true, scopeType: true, scopeId: true },
+    orderBy: { createdAt: "asc" },
+  });
+  res.json({ roles: target.roles, grants: fresh });
 });
 
 export default router;
