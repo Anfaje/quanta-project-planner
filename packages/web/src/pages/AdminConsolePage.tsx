@@ -25,6 +25,7 @@ import {
   TabPanel,
   Tabs,
 } from "../components/ui";
+import { PermissionsDrawer } from "../components/PermissionsDrawer";
 import { formatDate, formatRelative, roleLabel } from "../lib/format";
 
 /**
@@ -67,7 +68,7 @@ export function AdminConsolePage() {
       <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-6" />
 
       <TabPanel id="users" active={activeTab === "users"}>
-        <UsersTab canEditAll={isAA} buLeadOf={!isAA && isBUL ? (me.primaryBu?.code ?? null) : null} myId={me.id} />
+        <UsersTab canEditAll={isAA} buLeadOf={!isAA && isBUL ? (me.primaryBu?.code ?? null) : null} reachBuIds={!isAA && isBUL && me.primaryBu ? [me.primaryBu.id] : []} myId={me.id} />
       </TabPanel>
       <TabPanel id="bus" active={activeTab === "bus"}>
         <BusinessUnitsTab canWrite={isAA} />
@@ -89,10 +90,12 @@ export function AdminConsolePage() {
 function UsersTab({
   canEditAll,
   buLeadOf,
+  reachBuIds,
   myId,
 }: {
   canEditAll: boolean;
   buLeadOf: string | null; // BU code the caller leads (non-AA BUL), else null
+  reachBuIds: string[]; // BU ids the caller may administer grants within
   myId: string;
 }) {
   const qc = useQueryClient();
@@ -113,6 +116,7 @@ function UsersTab({
 
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<AdminUser | null>(null);
+  const [permissionsFor, setPermissionsFor] = useState<AdminUser | null>(null);
   const [inviting, setInviting] = useState(false);
 
   const filtered = useMemo(() => {
@@ -257,6 +261,11 @@ function UsersTab({
                             Edit
                           </Button>
                         )}
+                        {rowEditable && (
+                          <Button variant="ghost" size="sm" onClick={() => setPermissionsFor(u)}>
+                            Permissions
+                          </Button>
+                        )}
                         {u.isActive ? (
                           <Button
                             variant="ghost"
@@ -311,6 +320,18 @@ function UsersTab({
             setEditing(null);
             qc.invalidateQueries({ queryKey: ["admin", "users"] });
           }}
+        />
+      )}
+
+      {permissionsFor && busQ.data && (
+        <PermissionsDrawer
+          user={permissionsFor}
+          businessUnits={busQ.data.businessUnits}
+          accounts={accountsQ.data?.accounts ?? []}
+          meIsAa={canEditAll}
+          reachBuIds={reachBuIds}
+          onClose={() => setPermissionsFor(null)}
+          onSaved={() => qc.invalidateQueries({ queryKey: ["admin", "user-perms", permissionsFor.id] })}
         />
       )}
 
