@@ -806,6 +806,8 @@ router.get("/users/:id/permissions", async (req: Request, res: Response) => {
       id: true,
       roles: true,
       primaryBuId: true,
+      financialAccess: true,
+      managedAccounts: { select: { accountId: true } },
       permissionGrants: {
         select: { id: true, permission: true, scopeType: true, scopeId: true },
         orderBy: { createdAt: "asc" },
@@ -819,7 +821,13 @@ router.get("/users/:id/permissions", async (req: Request, res: Response) => {
   if (!isAa && !(reach.has(target.primaryBuId) && !target.roles.includes(Role.AA))) {
     return res.status(403).json({ error: "Cannot view this user's permissions" });
   }
-  res.json({ roles: target.roles, grants: target.permissionGrants });
+  res.json({
+    roles: target.roles,
+    financialAccess: target.financialAccess,
+    primaryBuId: target.primaryBuId,
+    managedAccountIds: target.managedAccounts.map((m) => m.accountId),
+    grants: target.permissionGrants,
+  });
 });
 
 /**

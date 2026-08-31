@@ -556,3 +556,27 @@ export interface BillingSchedule {
     blendedRate: number | null;
   };
 }
+
+// Permission grants (admin drawer) ------------------------------------
+export type GrantScopeType = "platform" | "business_unit" | "account" | "project";
+export type GrantPermission =
+  | "view_financials"
+  | "view_bill_rates"
+  | "manage_projects"
+  | "approve_drafts"
+  | "manage_users";
+
+export interface PermissionGrantRow {
+  id?: string;
+  permission: GrantPermission;
+  scopeType: GrantScopeType;
+  scopeId: string | null;
+}
+
+export interface UserPermissions {
+  roles: Role[];
+  financialAccess: boolean;
+  primaryBuId: string;
+  managedAccountIds: string[];
+  grants: PermissionGrantRow[];
+}
