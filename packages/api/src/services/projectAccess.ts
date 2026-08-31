@@ -1,6 +1,7 @@
 import { Prisma, Role } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import type { AuthUser, ResourceContext } from "../types";
+import { PROJECT_PERMISSIONS } from "../lib/permissions";
 
 /**
  * Project Access Helpers
@@ -39,6 +40,45 @@ export function buildProjectAccessFilter(user: AuthUser): Prisma.ProjectWhereInp
   if (user.roles.includes(Role.BUL)) {
     orClauses.push({ owningBuId: user.primaryBuId });
     orClauses.push({ shares: { some: { sharedWithBuId: user.primaryBuId } } });
+  }
+
+  // Grants widen visibility: any project-flavoured grant covers its scope.
+  const projectGrants = (user.grants ?? []).filter((g) =>
+    PROJECT_PERMISSIONS.includes(g.permission)
+  );
+  if (projectGrants.some((g) => g.scopeType === "platform")) {
+    return {};
+  }
+  const grantBuIds = [
+    ...new Set(
+      projectGrants
+        .filter((g) => g.scopeType === "business_unit" && g.scopeId != null)
+        .map((g) => g.scopeId as string)
+    ),
+  ];
+  const grantAccountIds = [
+    ...new Set(
+      projectGrants
+        .filter((g) => g.scopeType === "account" && g.scopeId != null)
+        .map((g) => g.scopeId as string)
+    ),
+  ];
+  const grantProjectIds = [
+    ...new Set(
+      projectGrants
+        .filter((g) => g.scopeType === "project" && g.scopeId != null)
+        .map((g) => g.scopeId as string)
+    ),
+  ];
+  if (grantBuIds.length > 0) {
+    orClauses.push({ owningBuId: { in: grantBuIds } });
+    orClauses.push({ shares: { some: { sharedWithBuId: { in: grantBuIds } } } });
+  }
+  if (grantAccountIds.length > 0) {
+    orClauses.push({ accountId: { in: grantAccountIds } });
+  }
+  if (grantProjectIds.length > 0) {
+    orClauses.push({ id: { in: grantProjectIds } });
   }
 
   if (orClauses.length === 0) {

@@ -25,6 +25,7 @@ function makeUser(overrides: Partial<AuthUser> = {}): AuthUser {
     financialAccess: false,
     isActive: true,
     managedAccountIds: [],
+    grants: [],
     ...overrides,
   };
 }

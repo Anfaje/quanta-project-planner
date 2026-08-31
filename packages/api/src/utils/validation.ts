@@ -230,3 +230,22 @@ export const resetPasswordSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters").max(100),
 });
 
+
+// Permission grants (admin) --------------------------------------------
+export const permissionGrantsSchema = z.object({
+  grants: z
+    .array(
+      z.object({
+        permission: z.enum([
+          "view_financials",
+          "view_bill_rates",
+          "manage_projects",
+          "approve_drafts",
+          "manage_users",
+        ]),
+        scopeType: z.enum(["platform", "business_unit", "account", "project"]),
+        scopeId: z.string().uuid().nullable().optional(),
+      })
+    )
+    .max(500),
+});

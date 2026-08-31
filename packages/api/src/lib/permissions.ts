@@ -1,4 +1,4 @@
-import { Role } from "@prisma/client";
+import { Role, Permission, GrantScope } from "@prisma/client";
 import type { AuthUser, Action, ResourceContext } from "../types";
 
 /**
@@ -38,6 +38,60 @@ export function hasCapability(user: AuthUser, action: Action): boolean {
  * PM gets bill rates but NOT cost rates or margins.
  * IC gets nothing.
  */
+// ── Scoped permission grants ─────────────────────────────────────────────
+// Additive overlay on the role presets: a grant can widen what roles allow,
+// never narrow it. A business-unit grant also covers projects *shared into*
+// that BU, mirroring the BUL role's semantics.
+
+/** Permissions whose grants imply visibility of the projects they cover. */
+export const PROJECT_PERMISSIONS: Permission[] = [
+  Permission.view_financials,
+  Permission.view_bill_rates,
+  Permission.manage_projects,
+  Permission.approve_drafts,
+];
+
+/** Does any grant of `permission` cover the project described by `ctx`? */
+export function hasGrant(
+  user: AuthUser,
+  permission: Permission,
+  ctx?: ResourceContext
+): boolean {
+  for (const g of user.grants ?? []) {
+    if (g.permission !== permission) continue;
+    if (g.scopeType === GrantScope.platform) return true;
+    if (!ctx || g.scopeId == null) continue;
+    if (
+      g.scopeType === GrantScope.business_unit &&
+      (g.scopeId === ctx.projectOwningBuId || ctx.projectSharedBuIds?.includes(g.scopeId))
+    ) {
+      return true;
+    }
+    if (g.scopeType === GrantScope.account && g.scopeId === ctx.projectAccountId) return true;
+    if (g.scopeType === GrantScope.project && g.scopeId === ctx.projectId) return true;
+  }
+  return false;
+}
+
+/** Scope-level check with no specific project (e.g. "may manage users in BU X"). */
+export function hasGrantAtScope(
+  user: AuthUser,
+  permission: Permission,
+  scopeType: GrantScope,
+  scopeId: string | null
+): boolean {
+  return (user.grants ?? []).some(
+    (g) =>
+      g.permission === permission &&
+      (g.scopeType === GrantScope.platform ||
+        (g.scopeType === scopeType && g.scopeId === scopeId))
+  );
+}
+
+function anyGrantCoversProject(user: AuthUser, ctx: ResourceContext): boolean {
+  return PROJECT_PERMISSIONS.some((perm) => hasGrant(user, perm, ctx));
+}
+
 export function canViewFinancials(user: AuthUser, ctx: ResourceContext): boolean {
   // AC path: project is in a managed account
   if (
@@ -59,6 +113,9 @@ export function canViewFinancials(user: AuthUser, ctx: ResourceContext): boolean
     return true;
   }
 
+  // Grant path: an explicit view_financials grant covering this project.
+  if (hasGrant(user, Permission.view_financials, ctx)) return true;
+
   return false;
 }
 
@@ -66,9 +123,12 @@ export function canViewFinancials(user: AuthUser, ctx: ResourceContext): boolean
  * Check if a user can view bill rates for a project.
  * PM, AC, BUL all see bill rates. AA with financial flag too.
  */
-export function canViewBillRates(user: AuthUser): boolean {
-  return hasCapability(user, "viewBillRates") ||
-    (user.roles.includes(Role.AA) && user.financialAccess);
+export function canViewBillRates(user: AuthUser, ctx?: ResourceContext): boolean {
+  return (
+    hasCapability(user, "viewBillRates") ||
+    (user.roles.includes(Role.AA) && user.financialAccess) ||
+    hasGrant(user, Permission.view_bill_rates, ctx)
+  );
 }
 
 /**
@@ -111,6 +171,10 @@ export function canAccessProject(
     if (ctx.projectSharedBuIds?.includes(user.primaryBuId)) return true;
   }
 
+  // Grants imply reach: any project-flavoured grant covering this project
+  // makes it visible (a grant you can't exercise would be decorative).
+  if (anyGrantCoversProject(user, ctx)) return true;
+
   return false;
 }
 
@@ -132,10 +196,13 @@ export function canEditHours(user: AuthUser, isOwnRow: boolean): boolean {
 /**
  * Check if a user can manage planned hours (set/edit the plan).
  */
-export function canManagePlan(user: AuthUser): boolean {
-  return user.roles.includes(Role.PM) ||
+export function canManagePlan(user: AuthUser, ctx?: ResourceContext): boolean {
+  return (
+    user.roles.includes(Role.PM) ||
     user.roles.includes(Role.AC) ||
-    user.roles.includes(Role.BUL);
+    user.roles.includes(Role.BUL) ||
+    hasGrant(user, Permission.manage_projects, ctx)
+  );
 }
 
 /**
@@ -150,10 +217,13 @@ export function isPlanLocked(status: string): boolean {
 /**
  * Check if a user can lock/unlock weeks.
  */
-export function canLockWeeks(user: AuthUser): boolean {
-  return user.roles.includes(Role.PM) ||
+export function canLockWeeks(user: AuthUser, ctx?: ResourceContext): boolean {
+  return (
+    user.roles.includes(Role.PM) ||
     user.roles.includes(Role.AC) ||
-    user.roles.includes(Role.BUL);
+    user.roles.includes(Role.BUL) ||
+    hasGrant(user, Permission.manage_projects, ctx)
+  );
 }
 
 /**
@@ -204,6 +274,12 @@ export function canCreateProject(
   if (user.roles.includes(Role.PM)) return true;
   if (user.roles.includes(Role.BUL) && owningBuId === user.primaryBuId) return true;
   if (user.roles.includes(Role.AC) && user.managedAccountIds.includes(accountId)) return true;
+  if (
+    hasGrantAtScope(user, Permission.manage_projects, GrantScope.business_unit, owningBuId) ||
+    hasGrantAtScope(user, Permission.manage_projects, GrantScope.account, accountId)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -226,9 +302,14 @@ export function canActivateProject(user: AuthUser, owningBuId: string): boolean 
  */
 export function canApproveDraft(
   user: AuthUser,
-  project: { owningBuId: string }
+  project: { owningBuId: string; accountId?: string; projectId?: string }
 ): boolean {
-  return canActivateProject(user, project.owningBuId);
+  if (canActivateProject(user, project.owningBuId)) return true;
+  return hasGrant(user, Permission.approve_drafts, {
+    projectOwningBuId: project.owningBuId,
+    projectAccountId: project.accountId,
+    projectId: project.projectId,
+  });
 }
 
 /**
@@ -255,6 +336,6 @@ export function canAccessDraft(
  * Requires a manage-capable role AND access to the project. The caller is
  * expected to combine this with canAccessProject / ResourceContext as needed.
  */
-export function canManageProject(user: AuthUser): boolean {
-  return hasCapability(user, "manageProject");
+export function canManageProject(user: AuthUser, ctx?: ResourceContext): boolean {
+  return hasCapability(user, "manageProject") || hasGrant(user, Permission.manage_projects, ctx);
 }

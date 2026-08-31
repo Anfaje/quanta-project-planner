@@ -60,29 +60,94 @@ router.get("/summary", async (req: Request, res: Response) => {
   type AccountLite = { id: string; name: string; code: string };
   let baseAccounts: AccountLite[] = [];
 
-  if (isAa && user.financialAccess) {
+  // Bases are an OR-union: role paths plus view_financials grants. A grant at
+  // account scope shows that account whole; at BU scope, that BU's slice.
+  const finGrants = (user.grants ?? []).filter((g) => g.permission === "view_financials");
+  const grantPlatform = finGrants.some((g) => g.scopeType === "platform");
+  const grantBuIds = [
+    ...new Set(
+      finGrants
+        .filter((g) => g.scopeType === "business_unit" && g.scopeId != null)
+        .map((g) => g.scopeId as string)
+    ),
+  ];
+  const grantAccountIds = [
+    ...new Set(
+      finGrants
+        .filter((g) => g.scopeType === "account" && g.scopeId != null)
+        .map((g) => g.scopeId as string)
+    ),
+  ];
+  const grantProjectIds = [
+    ...new Set(
+      finGrants
+        .filter((g) => g.scopeType === "project" && g.scopeId != null)
+        .map((g) => g.scopeId as string)
+    ),
+  ];
+
+  if ((isAa && user.financialAccess) || grantPlatform) {
     where = {};
     baseAccounts = await prisma.account.findMany({
       where: { isActive: true },
       select: { id: true, name: true, code: true },
     });
-  } else if (isBul) {
-    where = { owningBuId: user.primaryBuId };
-    const bu = await prisma.businessUnit.findUnique({
-      where: { id: user.primaryBuId },
-      select: { code: true },
-    });
-    slice = { buCode: bu?.code ?? "" };
-  } else if (isAc && user.managedAccountIds.length > 0) {
-    where = { accountId: { in: user.managedAccountIds } };
-    baseAccounts = await prisma.account.findMany({
-      where: { id: { in: user.managedAccountIds } },
-      select: { id: true, name: true, code: true },
-    });
   } else {
-    return res.status(403).json({
-      error: "Account summaries require AA (with financial access), BUL, or AC with managed accounts",
-    });
+    const orClauses: Record<string, unknown>[] = [];
+    if (isBul) {
+      orClauses.push({ owningBuId: user.primaryBuId });
+    }
+    if (isAc && user.managedAccountIds.length > 0) {
+      orClauses.push({ accountId: { in: user.managedAccountIds } });
+    }
+    if (grantBuIds.length > 0) {
+      orClauses.push({ owningBuId: { in: grantBuIds } });
+      orClauses.push({ shares: { some: { sharedWithBuId: { in: grantBuIds } } } });
+    }
+    if (grantAccountIds.length > 0) {
+      orClauses.push({ accountId: { in: grantAccountIds } });
+    }
+    if (grantProjectIds.length > 0) {
+      orClauses.push({ id: { in: grantProjectIds } });
+    }
+    if (orClauses.length === 0) {
+      return res.status(403).json({
+        error:
+          "Account summaries require AA (with financial access), BUL, AC, or a finance-visibility grant",
+      });
+    }
+    where = { OR: orClauses };
+
+    // Slice label only when the numbers are exactly one BU's slice.
+    const sliceBuIds = new Set<string>([
+      ...(isBul ? [user.primaryBuId] : []),
+      ...grantBuIds,
+    ]);
+    const accountWide =
+      (isAc && user.managedAccountIds.length > 0) ||
+      grantAccountIds.length > 0 ||
+      grantProjectIds.length > 0;
+    if (!accountWide && sliceBuIds.size === 1) {
+      const bu = await prisma.businessUnit.findUnique({
+        where: { id: [...sliceBuIds][0] },
+        select: { code: true },
+      });
+      slice = { buCode: bu?.code ?? "" };
+    }
+
+    if (isAc && user.managedAccountIds.length > 0) {
+      baseAccounts = await prisma.account.findMany({
+        where: { id: { in: user.managedAccountIds } },
+        select: { id: true, name: true, code: true },
+      });
+    }
+    if (grantAccountIds.length > 0) {
+      const extra = await prisma.account.findMany({
+        where: { id: { in: grantAccountIds } },
+        select: { id: true, name: true, code: true },
+      });
+      baseAccounts = [...baseAccounts, ...extra];
+    }
   }
 
   const projects = await prisma.project.findMany({
