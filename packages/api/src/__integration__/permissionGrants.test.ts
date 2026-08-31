@@ -41,6 +41,7 @@ async function draftPayload(db: PrismaClient) {
     endDate: "2026-10-04",
     contingencyPct: 0.15,
     pricingModel: "time_and_materials" as const,
+    saveAsDraft: true,
     assignments: [{ userId: pm.id, projectRole: "PM", billRate: 175, costRate: 95 }],
     plannedHours: [{ userId: pm.id, projectWeek: 0, plannedHours: 10 }],
   };

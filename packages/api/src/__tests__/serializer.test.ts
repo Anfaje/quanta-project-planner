@@ -7,7 +7,8 @@ function makeUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
     id: "user-1", email: "test@test.com", name: "Test", roles: [Role.IC],
     projectRoles: [], primaryBuId: "bu-owls", financialAccess: false,
-    isActive: true, managedAccountIds: [], ...overrides,
+    isActive: true, managedAccountIds: [],
+    grants: [], ...overrides,
   };
 }
 
