@@ -1,0 +1,50 @@
+# TEMPORARY — deleted in the same PR once the migration is generated.
+name: Generate bu-target migration
+on:
+  push:
+    branches: [bu-target-margin]
+permissions:
+  contents: write
+jobs:
+  generate:
+    if: ${{ !contains(github.event.head_commit.message, '[generated]') }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install API deps
+        run: npm install --no-audit --no-fund
+        working-directory: packages/api
+      - name: Generate migration delta
+        working-directory: packages/api
+        run: |
+          MIG_DIR="prisma/migrations/20260817000000_bu_target_margin"
+          mkdir -p "$MIG_DIR"
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "postgresql://postgres:postgres@localhost:5432/shadow" \
+            --script > "$MIG_DIR/migration.sql"
+          cat "$MIG_DIR/migration.sql"
+      - name: Commit generated files back
+        run: |
+          git config user.name "quanta-ci"
+          git config user.email "ci@users.noreply.github.com"
+          git add packages/api/prisma/migrations
+          git commit -m "Add generated bu-target migration [generated]"
+          git push
