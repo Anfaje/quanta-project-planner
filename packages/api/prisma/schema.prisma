@@ -38,6 +38,39 @@ enum Role {
 // Project pricing currency. Rates, fees, and fixed prices on a project are
 // denominated in its currency; cross-project aggregations convert at display
 // time (services/currency.ts).
+// ── Scoped permission grants (overlay on role presets) ──────────────────
+// Additive-only: a grant can widen what roles allow, never narrow it.
+// scopeId is null only for platform scope ("Everything").
+enum Permission {
+  view_financials
+  view_bill_rates
+  manage_projects
+  approve_drafts
+  manage_users
+}
+
+enum GrantScope {
+  platform
+  business_unit
+  account
+  project
+}
+
+model PermissionGrant {
+  id         String     @id @default(uuid())
+  userId     String     @map("user_id")
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission
+  scopeType  GrantScope @map("scope_type")
+  scopeId    String?    @map("scope_id")
+  grantedBy  String?    @map("granted_by")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  @@unique([userId, permission, scopeType, scopeId])
+  @@index([userId])
+  @@map("permission_grants")
+}
+
 enum Currency {
   USD
   GBP
@@ -79,6 +112,8 @@ model User {
   baselinesCaptured PlanBaseline[]  @relation("BaselineCapturer")
 
   @@index([primaryBuId])
+  permissionGrants PermissionGrant[]
+
   @@map("users")
 }
 
