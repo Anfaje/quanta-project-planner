@@ -29,7 +29,7 @@ router.get("/users", async (req: Request, res: Response) => {
   const user = req.authUser!;
   // Read access spans the roles that can create or staff projects, plus
   // holders of manage_projects / manage_users grants (same needs).
-  const directoryRoles = [Role.PM, Role.BUL, Role.AC, Role.AA];
+  const directoryRoles: Role[] = [Role.PM, Role.BUL, Role.AC, Role.AA];
   const canSeeDirectory =
     user.roles.some((r) => directoryRoles.includes(r)) ||
     (user.grants ?? []).some(
@@ -559,7 +559,7 @@ router.post("/users/invite", async (req: Request, res: Response) => {
 // invitations (mutations below remain AA-only).
 router.get("/domains", async (req: Request, res: Response) => {
   const dUser = req.authUser!;
-  const domainReaders = [Role.BUL, Role.AA];
+  const domainReaders: Role[] = [Role.BUL, Role.AA];
   if (
     !dUser.roles.some((r) => domainReaders.includes(r)) &&
     !(dUser.grants ?? []).some((g) => g.permission === Permission.manage_users)
