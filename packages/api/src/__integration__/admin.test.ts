@@ -214,7 +214,7 @@ describe("PUT /api/admin/users/:id/cost-rate", () => {
       where: { entityType: "User", entityId: member.id, field: "cost_rate" },
     });
     expect(log).not.toBeNull();
-    expect(log?.newValue).toBe("100");
+    expect(log?.newValue).toBe("100 USD");
   });
 
   it("BUL cannot set the cost rate for a user in another BU (403)", async () => {
