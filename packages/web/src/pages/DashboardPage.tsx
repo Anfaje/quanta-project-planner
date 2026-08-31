@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { HoursGridPanel } from "../components/HoursGridPanel";
 import { CURRENCIES } from "../lib/constants";
@@ -18,6 +18,7 @@ import type { Currency, Dashboard, BuHealthTrajectoryPoint } from "../lib/types"
 import { useMe } from "../context/AuthContext";
 import { Layout } from "../components/Layout";
 import { Card, CardBody, CardHeader, Badge, Spinner, Alert, EmptyState } from "../components/ui";
+import { EditBuTargetModal } from "../components/EditBuTargetModal";
 import {
   formatMoney,
   formatHours,
@@ -418,6 +419,7 @@ function BuHealthSection({
   data: NonNullable<Dashboard["buHealth"]>;
   currency: Currency;
 }) {
+  const [editingTarget, setEditingTarget] = useState(false);
   const bu = data.businessUnit;
   return (
     <Card>
@@ -445,15 +447,35 @@ function BuHealthSection({
               label="Actual margin"
               value={formatPercent(data.actualMarginPct)}
               hint={
-                data.marginTargetPct != null
-                  ? `Target: ${formatPercent(data.marginTargetPct)}`
-                  : undefined
+                data.marginTargetPct != null ? (
+                  <>
+                    Target: {formatPercent(data.marginTargetPct)}
+                    {data.businessUnit && (
+                      <button
+                        type="button"
+                        className="ml-1.5 text-indigo-500 hover:text-indigo-700"
+                        onClick={() => setEditingTarget(true)}
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </>
+                ) : undefined
               }
               tone={
                 data.marginTargetPct != null && data.actualMarginPct >= data.marginTargetPct
                   ? "emerald"
                   : "amber"
               }
+            />
+          )}
+          {editingTarget && data.businessUnit && (
+            <EditBuTargetModal
+              buId={data.businessUnit.id}
+              buCode={data.businessUnit.code}
+              current={data.marginTargetPct ?? 35}
+              invalidateKeys={[["dashboard"], ["admin", "bus"]]}
+              onClose={() => setEditingTarget(false)}
             />
           )}
           <Metric
@@ -631,7 +653,7 @@ function Metric({
 }: {
   label: string;
   value: string;
-  hint?: string;
+  hint?: ReactNode;
   tone?: "gray" | "emerald" | "amber" | "rose" | "indigo";
 }) {
   const toneClass = {

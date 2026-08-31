@@ -119,6 +119,8 @@ export interface ProjectListItem {
   endDate: string;
   contingencyPct: number;
   account: AccountLite;
+  /** Owning BU's margin target (percent). */
+  targetMarginPct?: number;
   owningBu: BusinessUnitLite;
   resourceCount: number;
   currency: Currency;
@@ -200,6 +202,7 @@ export interface ProjectDetail {
     contingencyPct: number;
     contingencyAmt?: number;
     marginPct?: number;
+    targetMarginPct?: number;
     belowTarget: boolean;
   };
   capabilities: {
@@ -440,6 +443,8 @@ export interface AdminBusinessUnit {
   code: string;
   name: string;
   isActive: boolean;
+  /** Percent, e.g. 35 = 35%. */
+  targetMarginPct: number;
   userCount: number;
   projectCount: number;
   bul: { id: string; name: string } | null;

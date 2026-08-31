@@ -249,3 +249,9 @@ export const permissionGrantsSchema = z.object({
     )
     .max(500),
 });
+
+// BU configuration ------------------------------------------------------
+export const buTargetSchema = z.object({
+  // Percent, e.g. 35 = 35%. Zero disables the below-target flagging.
+  targetMarginPct: z.number().min(0).max(95),
+});

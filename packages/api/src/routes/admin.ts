@@ -4,7 +4,7 @@ import { Role, GrantScope, Permission, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
 import { requireAuth, requireRoles } from "../middleware/auth";
-import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema, updateMeSchema, permissionGrantsSchema } from "../utils/validation";
+import { updateRolesSchema, domainSchema, inviteSchema, updateCostRateSchema, updateMeSchema, permissionGrantsSchema, buTargetSchema } from "../utils/validation";
 import { logChanges, diffFields } from "../services/auditLog";
 import { captureBaseline } from "../services/planBaseline";
 
@@ -664,6 +664,7 @@ router.get("/bus", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (_re
     code: b.code,
     name: b.name,
     isActive: b.isActive,
+    targetMarginPct: b.targetMarginPct,
     userCount: b._count.users,
     projectCount: b._count.ownedProjects,
     bul: b.users[0] || null,
@@ -694,6 +695,41 @@ router.post("/bus", requireRoles(Role.AA), async (req: Request, res: Response) =
 /**
  * PUT /api/admin/bus/:id/deactivate
  */
+/**
+ * PATCH /api/admin/bus/:id — BU configuration (target margin).
+ * AA for any BU; a BUL for their own BU (it's their dashboard target).
+ */
+router.patch("/bus/:id", async (req: Request, res: Response) => {
+  const actor = req.authUser!;
+  const parsed = buTargetSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+  }
+  const bu = await prisma.businessUnit.findUnique({ where: { id: req.params.id } });
+  if (!bu) return res.status(404).json({ error: "Business unit not found" });
+  const isAa = actor.roles.includes(Role.AA);
+  const isOwnBul = actor.roles.includes(Role.BUL) && actor.primaryBuId === bu.id;
+  if (!isAa && !isOwnBul) {
+    return res.status(403).json({ error: "Only an AA or this business unit's lead can set its targets" });
+  }
+  const updated = await prisma.businessUnit.update({
+    where: { id: bu.id },
+    data: { targetMarginPct: parsed.data.targetMarginPct },
+  });
+  await logChanges("BusinessUnit", bu.id, actor.id, [
+    {
+      field: "target_margin_pct",
+      oldValue: bu.targetMarginPct.toString(),
+      newValue: updated.targetMarginPct.toString(),
+    },
+  ]);
+  logger.info(
+    { buId: bu.id, actor: actor.id, targetMarginPct: updated.targetMarginPct },
+    "BU target margin updated"
+  );
+  res.json({ id: updated.id, targetMarginPct: updated.targetMarginPct });
+});
+
 router.put("/bus/:id/deactivate", requireRoles(Role.AA), async (req: Request, res: Response) => {
   await prisma.businessUnit.update({ where: { id: req.params.id }, data: { isActive: false } });
   res.json({ message: "Business unit deactivated" });
