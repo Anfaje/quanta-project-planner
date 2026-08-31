@@ -1,37 +1,19 @@
 import { describe, it } from "vitest";
 
 /**
- * TEST PLAN — "Add new" on manageable dropdowns (creatable selects).
+ * REMAINING ACCEPTANCE TODOS — "Add new" on manageable dropdowns.
  *
- * Design under test (not yet built):
- * A shared CreatableSelect wrapper renders the normal options plus a final
- * "+ Add new …" affordance, shown ONLY when the caller can create that
- * entity type. Choosing it opens the matching inline create modal (the
- * existing CreateAccountModal / CreateBuModal — extracted from
- * AdminConsolePage — or InviteModal), WITHOUT committing a selection.
- * On success: the backing query is invalidated, the fresh entity is
- * auto-selected, focus returns to the select. On cancel: the previous
- * value and focus are restored.
+ * The feature is implemented: CreatableSelect + the create/invite modals are
+ * wired into all seven surfaces, gated by lib/capabilities.ts, which honours
+ * the grants overlay (manage_users@BU grantees can invite into their granted
+ * BUs; the invite, directory, and domains endpoints accept them server-side —
+ * covered by API integration tests in permissionGrants.test.ts). The shared
+ * CreatableSelect behaviour has real tests in
+ * components/CreatableSelect.test.tsx.
  *
- * Gating (mirrors existing server guards — no new API is needed):
- *   accounts        POST /api/admin/accounts      AA only
- *   business units  POST /api/admin/bus           AA only
- *   users (invite)  POST /api/admin/users/invite  AA + BUL (BUL locked to own BU,
- *                                                 foreign-domain amber note preserved)
- *
- * Every test here is an it.todo — they enumerate the acceptance criteria
- * for development and intentionally do not run yet.
+ * What remains below are UI-flow acceptance criteria not yet automated
+ * (they need heavier page-level harnesses), plus the pinned absences.
  */
-
-describe("CreatableSelect (shared behaviour)", () => {
-  it.todo("renders '+ Add new …' as the final option only when the caller can create the entity");
-  it.todo("renders no affordance at all (absent, not disabled) when the caller cannot create");
-  it.todo("choosing '+ Add new …' opens the create modal and does not change the committed selection");
-  it.todo("cancelling the create modal restores the previous selection and returns focus to the select");
-  it.todo("successful create closes the modal, invalidates the option query, and auto-selects the new entity");
-  it.todo("a server error in the modal (e.g. 409 duplicate code) is shown inline and the dropdown stays usable");
-  it.todo("the affordance and modal are keyboard-reachable (a11y: focus trap in modal, escape cancels)");
-});
 
 describe("Project wizard — Account select", () => {
   it.todo("AA sees '+ New account…'; PM, BUL, AC, and IC do not");

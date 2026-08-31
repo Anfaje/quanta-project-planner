@@ -51,6 +51,8 @@ export interface Me {
   financialAccess: boolean;
   managedAccounts: AccountLite[];
   dashboardSections: DashboardSection[];
+  /** Scoped permission grants (additive overlay on roles). */
+  grants?: PermissionGrantRow[];
 }
 
 export interface LoginMfaRequired {
@@ -464,6 +466,8 @@ export interface AdminDomain {
 
 export interface InviteCreatedResponse {
   message: string;
+  /** The pending user's id — lets callers auto-select them immediately. */
+  userId: string;
   email: string;
   token: string;
   acceptUrl: string;

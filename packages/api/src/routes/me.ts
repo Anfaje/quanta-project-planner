@@ -44,6 +44,7 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
     financialAccess: user.financialAccess,
     managedAccounts,
     dashboardSections,
+    grants: user.grants,
   });
 });
 

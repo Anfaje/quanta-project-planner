@@ -25,8 +25,19 @@ router.use(requireAuth);
 // the project-creation wizard loads the user, BU, and account lists from these
 // admin read endpoints. The write endpoints below stay AA-only (BU/account
 // management is admin-only); only the reads are opened up.
-router.get("/users", requireRoles(Role.PM, Role.BUL, Role.AC, Role.AA), async (req: Request, res: Response) => {
+router.get("/users", async (req: Request, res: Response) => {
   const user = req.authUser!;
+  // Read access spans the roles that can create or staff projects, plus
+  // holders of manage_projects / manage_users grants (same needs).
+  const directoryRoles = [Role.PM, Role.BUL, Role.AC, Role.AA];
+  const canSeeDirectory =
+    user.roles.some((r) => directoryRoles.includes(r)) ||
+    (user.grants ?? []).some(
+      (g) => g.permission === Permission.manage_projects || g.permission === Permission.manage_users
+    );
+  if (!canSeeDirectory) {
+    return res.status(403).json({ error: "Insufficient role" });
+  }
   const isBULOnly = user.roles.includes(Role.BUL) && !user.roles.includes(Role.AA);
 
   const where = isBULOnly ? { primaryBuId: user.primaryBuId } : {};
@@ -428,7 +439,15 @@ router.delete("/users/:id", requireRoles(Role.AA), async (req: Request, res: Res
  * for now the token is returned in the response so the inviter can share the
  * link manually (SMTP delivery is deferred to Drop 6).
  */
-router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
+router.post("/users/invite", async (req: Request, res: Response) => {
+  const inviteActor = req.authUser!;
+  // AA anywhere; otherwise the actor's user-admin reach: their own BU if
+  // they're a BUL, plus any BU where they hold a manage_users grant.
+  const inviteReach = grantEditorReach(inviteActor);
+  if (!inviteActor.roles.includes(Role.AA) && inviteReach.size === 0) {
+    return res.status(403).json({ error: "Inviting users requires AA, BUL, or a user-admin grant" });
+  }
+
   const parsed = inviteSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
@@ -436,12 +455,11 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
 
   const { email, buId, name, projectRole, roles } = parsed.data;
 
-  // BU leads invite into their own BU only, and can grant up to BUL — the
-  // Account Administrator role is granted only by an AA.
-  const inviteActor = req.authUser!;
+  // Non-AA actors invite into BUs they administer only, and can grant up to
+  // BUL — the Account Administrator role is granted only by an AA.
   if (!inviteActor.roles.includes(Role.AA)) {
-    if (buId !== inviteActor.primaryBuId) {
-      return res.status(403).json({ error: "You can only invite users into your own business unit" });
+    if (!inviteReach.has(buId)) {
+      return res.status(403).json({ error: "You can only invite users into business units you administer" });
     }
     if ((roles ?? []).includes(Role.AA)) {
       return res.status(403).json({ error: "Only an AA can grant the Account Administrator role" });
@@ -479,7 +497,7 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-  await prisma.$transaction([
+  const inviteTx = await prisma.$transaction([
     prisma.userInvite.deleteMany({ where: { email, acceptedAt: null } }),
     // Create the user up front — inactive, no password — so they can be staffed
     // onto projects before they accept. A re-invite refreshes the pending row.
@@ -522,6 +540,7 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
 
   res.status(201).json({
     message: "Invitation created",
+    userId: (inviteTx[1] as { id: string }).id,
     email,
     token,
     acceptUrl: `/invite/${token}`,
@@ -538,7 +557,15 @@ router.post("/users/invite", requireRoles(Role.BUL, Role.AA), async (req: Reques
  */
 // Readable by BUL too — the invite modal uses the list to flag foreign-domain
 // invitations (mutations below remain AA-only).
-router.get("/domains", requireRoles(Role.BUL, Role.AA), async (_req: Request, res: Response) => {
+router.get("/domains", async (req: Request, res: Response) => {
+  const dUser = req.authUser!;
+  const domainReaders = [Role.BUL, Role.AA];
+  if (
+    !dUser.roles.some((r) => domainReaders.includes(r)) &&
+    !(dUser.grants ?? []).some((g) => g.permission === Permission.manage_users)
+  ) {
+    return res.status(403).json({ error: "Insufficient role" });
+  }
   const domains = await prisma.domainWhitelist.findMany({
     orderBy: { domain: "asc" },
     include: { addedByUser: { select: { name: true } } },
