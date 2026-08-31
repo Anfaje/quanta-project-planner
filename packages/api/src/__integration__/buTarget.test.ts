@@ -89,14 +89,14 @@ describe("BU target margin", () => {
 
     // Default target (35%): a 50%-margin project is fine.
     let detail = await aaAgent.get(`/api/projects/${project.id}`).expect(200);
-    expect(detail.body.financials.belowTarget).toBe(false);
-    expect(detail.body.financials.targetMarginPct).toBe(35);
+    expect(detail.body.approvalFinancials.belowTarget).toBe(false);
+    expect(detail.body.approvalFinancials.targetMarginPct).toBe(35);
 
     // Raise the BU's bar above the project's margin: the flag flips.
     await aaAgent.patch(`/api/admin/bus/${bu.id}`).send({ targetMarginPct: 60 }).expect(200);
     detail = await aaAgent.get(`/api/projects/${project.id}`).expect(200);
-    expect(detail.body.financials.belowTarget).toBe(true);
-    expect(detail.body.financials.targetMarginPct).toBe(60);
+    expect(detail.body.approvalFinancials.belowTarget).toBe(true);
+    expect(detail.body.approvalFinancials.targetMarginPct).toBe(60);
   });
 
   it("the BU-health dashboard reports the BU's own target", async () => {
