@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import type {
+  Currency,
   AdminAccount,
   AdminBusinessUnit,
   AdminDomain,
@@ -19,7 +20,6 @@ import {
   FormInput,
   Modal,
   PageHeader,
-  PromptModal,
   Spinner,
   TabPanel,
   Tabs,
@@ -29,7 +29,8 @@ import { InviteModal } from "../components/InviteModal";
 import { CreateBuModal, CreateAccountModal } from "../components/EntityCreateModals";
 import { CreatableSelect } from "../components/CreatableSelect";
 import { EditBuTargetModal } from "../components/EditBuTargetModal";
-import { formatRelative, roleLabel } from "../lib/format";
+import { CURRENCIES } from "../lib/currency";
+import { formatMoney, formatRelative, roleLabel } from "../lib/format";
 
 /**
  * Admin console.
@@ -157,8 +158,11 @@ function UsersTab({
 
   const [costEditing, setCostEditing] = useState<AdminUser | null>(null);
   const costRateMutation = useMutation({
-    mutationFn: (args: { id: string; costRate: number | null }) =>
-      api.put(`/api/admin/users/${args.id}/cost-rate`, { costRate: args.costRate }),
+    mutationFn: (args: { id: string; costRate: number | null; currency: Currency }) =>
+      api.put(`/api/admin/users/${args.id}/cost-rate`, {
+        costRate: args.costRate,
+        currency: args.currency,
+      }),
     onSuccess: () => {
       setCostEditing(null);
       qc.invalidateQueries({ queryKey: ["admin", "users"] });
@@ -239,7 +243,7 @@ function UsersTab({
                         title="Edit cost rate"
                       >
                         {u.costRate != null ? (
-                          `$${u.costRate}`
+                          formatMoney(u.costRate, u.costRateCurrency, true)
                         ) : (
                           <span className="text-gray-300">— set</span>
                         )}
@@ -348,30 +352,13 @@ function UsersTab({
       )}
 
       {costEditing && (
-        <PromptModal
-          open
-          title={`Cost rate — ${costEditing.name}`}
-          message="Fully-loaded hourly cost (salary + overhead). New projects use this rate; existing projects keep the rate captured when they were created. Leave blank to clear."
-          placeholder="e.g. 120"
-          initialValue={costEditing.costRate != null ? String(costEditing.costRate) : ""}
-          submitLabel="Save"
-          inputType="number"
-          inputMode="decimal"
-          validator={(v) => {
-            if (v.trim() === "") return null; // blank clears the rate
-            const n = Number(v);
-            if (!Number.isFinite(n) || n < 0) return "Enter a non-negative number";
-            return null;
-          }}
+        <CostRateModal
+          user={costEditing}
           loading={costRateMutation.isPending}
           onCancel={() => setCostEditing(null)}
-          onSubmit={(v) => {
-            const trimmed = v.trim();
-            costRateMutation.mutate({
-              id: costEditing.id,
-              costRate: trimmed === "" ? null : Number(trimmed),
-            });
-          }}
+          onSubmit={(rate, currency) =>
+            costRateMutation.mutate({ id: costEditing.id, costRate: rate, currency })
+          }
         />
       )}
 
@@ -974,4 +961,70 @@ function DomainsTab() {
       />
     </div>
   );
+}function CostRateModal({
+  user,
+  loading,
+  onCancel,
+  onSubmit,
+}: {
+  user: AdminUser;
+  loading: boolean;
+  onCancel: () => void;
+  onSubmit: (rate: number | null, currency: Currency) => void;
+}) {
+  const [value, setValue] = useState(user.costRate != null ? String(user.costRate) : "");
+  const [currency, setCurrency] = useState<Currency>(user.costRateCurrency ?? "USD");
+  const n = Number(value);
+  const valid = value.trim() === "" || (Number.isFinite(n) && n >= 0);
+
+  return (
+    <Modal open onClose={onCancel} title={`Cost rate — ${user.name}`} size="sm">
+      <p className="text-sm text-gray-500 mb-4">
+        Fully-loaded hourly cost (salary + overhead) in the person's home currency. New projects
+        convert it into their own currency automatically; existing projects keep the rate captured
+        when they were created. Leave blank to clear.
+      </p>
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <FormInput
+            label="Hourly cost"
+            type="number"
+            value={value}
+            onChange={setValue}
+            placeholder="e.g. 120"
+            autoFocus
+          />
+        </div>
+        <div className="w-28">
+          <div className="text-sm font-medium text-gray-700 mb-1">Currency</div>
+          <select
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value as Currency)}
+            className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50"
+            aria-label="Cost rate currency"
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="flex justify-end gap-2 pt-4 border-t border-gray-100 mt-4">
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          loading={loading}
+          disabled={!valid}
+          onClick={() => onSubmit(value.trim() === "" ? null : n, currency)}
+        >
+          Save
+        </Button>
+      </div>
+    </Modal>
+  );
 }
+
+

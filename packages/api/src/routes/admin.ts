@@ -53,6 +53,7 @@ router.get("/users", async (req: Request, res: Response) => {
       primaryBuId: true,
       financialAccess: true,
       costRate: true,
+      costRateCurrency: true,
       isActive: true,
       passwordHash: true,
       createdAt: true,
@@ -74,6 +75,7 @@ router.get("/users", async (req: Request, res: Response) => {
     primaryBu: u.primaryBu,
     financialAccess: u.financialAccess,
     costRate: u.costRate != null ? Number(u.costRate) : null,
+    costRateCurrency: u.costRateCurrency,
     isActive: u.isActive,
     status: u.isActive ? "active" : u.passwordHash == null ? "pending" : "deactivated",
     createdAt: u.createdAt,
@@ -90,7 +92,7 @@ router.get("/users", async (req: Request, res: Response) => {
  * BUL: own-BU users only. AA: anyone. New projects snapshot this value;
  * existing projects keep the rate captured when they were created.
  */
-router.put("/users/:id/cost-rate", requireRoles(Role.BUL, Role.AA), async (req: Request, res: Response) => {
+router.put("/users/:id/cost-rate", async (req: Request, res: Response) => {
   const actor = req.authUser!;
   const parsed = updateCostRateSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -99,31 +101,39 @@ router.put("/users/:id/cost-rate", requireRoles(Role.BUL, Role.AA), async (req: 
 
   const target = await prisma.user.findUnique({
     where: { id: req.params.id },
-    select: { id: true, primaryBuId: true, costRate: true },
+    select: { id: true, primaryBuId: true, costRate: true, costRateCurrency: true },
   });
   if (!target) return res.status(404).json({ error: "User not found" });
 
-  // BUL may only set cost rates for users in their own business unit.
-  const isBULOnly = actor.roles.includes(Role.BUL) && !actor.roles.includes(Role.AA);
-  if (isBULOnly && target.primaryBuId !== actor.primaryBuId) {
+  // Default capability: AA anywhere, BUL for their own BU — widened by the
+  // grants overlay (manage_users@BU covers that BU's users, same as invites).
+  if (!actor.roles.includes(Role.AA) && !grantEditorReach(actor).has(target.primaryBuId)) {
     return res
       .status(403)
-      .json({ error: "You can only set cost rates for users in your own business unit" });
+      .json({ error: "You can only set cost rates for users in business units you administer" });
   }
 
   const newRate = parsed.data.costRate;
-  await prisma.user.update({ where: { id: target.id }, data: { costRate: newRate } });
+  const newCurrency = parsed.data.currency ?? target.costRateCurrency;
+  await prisma.user.update({
+    where: { id: target.id },
+    data: { costRate: newRate, costRateCurrency: newCurrency },
+  });
 
   await logChanges("User", target.id, actor.id, [
     {
       field: "cost_rate",
-      oldValue: target.costRate != null ? target.costRate.toString() : null,
-      newValue: newRate != null ? String(newRate) : null,
+      oldValue:
+        target.costRate != null ? `${target.costRate} ${target.costRateCurrency}` : null,
+      newValue: newRate != null ? `${newRate} ${newCurrency}` : null,
     },
   ]);
-  logger.info({ targetUser: target.id, actor: actor.id, costRate: newRate }, "Cost rate updated");
+  logger.info(
+    { targetUser: target.id, actor: actor.id, costRate: newRate, currency: newCurrency },
+    "Cost rate updated"
+  );
 
-  res.json({ id: target.id, costRate: newRate });
+  res.json({ id: target.id, costRate: newRate, costRateCurrency: newCurrency });
 });
 
 /**
