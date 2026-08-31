@@ -80,6 +80,35 @@ describe("AdminConsolePage — cost rate", () => {
     expect(screen.getByText("$120.00")).toBeInTheDocument();
   });
 
+  it("the user edit modal shows the default-rate field for ICs and saves rate + currency", async () => {
+    (api.put as any).mockResolvedValue({});
+    renderWithProviders(<AdminConsolePage />);
+    await screen.findByText("Maya Chen");
+
+    // Open the detail/edit view for the IC.
+    const row = screen.getByText("Maya Chen").closest("tr")!;
+    await userEvent.click(within(row).getByRole("button", { name: /edit/i }));
+    const dialog = await screen.findByRole("dialog");
+
+    // The IC role is applied → the default-rate input is present.
+    const rate = within(dialog).getByLabelText("Default hourly cost");
+    expect(rate).toHaveValue(120);
+    await userEvent.clear(rate);
+    await userEvent.type(rate, "150");
+    await userEvent.selectOptions(
+      within(dialog).getByLabelText("Default cost currency"),
+      "DKK"
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(api.put).toHaveBeenCalledWith("/api/admin/users/u1/cost-rate", {
+        costRate: 150,
+        currency: "DKK",
+      });
+    });
+  });
+
   it("edits a cost rate via the prompt and PUTs the new value", async () => {
     (api.put as any).mockResolvedValue({ id: "u1", costRate: 150 });
     renderWithProviders(<AdminConsolePage />);

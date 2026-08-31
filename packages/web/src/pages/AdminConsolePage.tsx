@@ -414,6 +414,12 @@ function UserEditModal({
   );
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [projectRolesText, setProjectRolesText] = useState(user.projectRoles.join(", "));
+  const [costRateText, setCostRateText] = useState(
+    user.costRate != null ? String(user.costRate) : ""
+  );
+  const [costCurrency, setCostCurrency] = useState<Currency>(user.costRateCurrency ?? "USD");
+  const costN = Number(costRateText);
+  const costValid = costRateText.trim() === "" || (Number.isFinite(costN) && costN >= 0);
   const [error, setError] = useState<string | null>(null);
 
   const mutation = useMutation({
@@ -424,6 +430,16 @@ function UserEditModal({
         .filter(Boolean);
       if (JSON.stringify(newProjectRoles) !== JSON.stringify(user.projectRoles)) {
         await api.put(`/api/admin/users/${user.id}/profile`, { projectRoles: newProjectRoles });
+      }
+      const newRate = costRateText.trim() === "" ? null : costN;
+      if (
+        roles.includes("IC") &&
+        (newRate !== user.costRate || costCurrency !== user.costRateCurrency)
+      ) {
+        await api.put(`/api/admin/users/${user.id}/cost-rate`, {
+          costRate: newRate,
+          currency: costCurrency,
+        });
       }
       return api.put(
         `/api/admin/users/${user.id}/roles`,
@@ -498,6 +514,40 @@ function UserEditModal({
           hint="Comma-separated planning labels — these don't change permissions."
         />
       </div>
+
+      {roles.includes("IC") && (
+        <div className="mb-5">
+          <div className="text-sm font-medium text-gray-700 mb-1">Default hourly cost</div>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              inputMode="decimal"
+              value={costRateText}
+              onChange={(e) => setCostRateText(e.target.value)}
+              placeholder="e.g. 120"
+              aria-label="Default hourly cost"
+              className="flex-1 px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50"
+            />
+            <select
+              value={costCurrency}
+              onChange={(e) => setCostCurrency(e.target.value as Currency)}
+              aria-label="Default cost currency"
+              className="w-28 px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50"
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            Fully-loaded cost in the person's home currency — converted into each project's
+            currency when they're staffed. Blank clears it.{" "}
+            {!costValid && <span className="text-rose-600">Enter a non-negative number.</span>}
+          </p>
+        </div>
+      )}
 
       {!restricted && (
       <div className="mb-5">
@@ -593,7 +643,7 @@ function UserEditModal({
             setError(null);
             mutation.mutate();
           }}
-          disabled={roles.length === 0}
+          disabled={roles.length === 0 || !costValid}
         >
           Save changes
         </Button>
