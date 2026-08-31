@@ -403,7 +403,7 @@ async function buildBuHealthSection(user: any, display: Currency) {
     totalFee += fin.totalFee;
     totalCost += fin.totalCost;
     // "At risk" = projected margin below this BU's target
-    if (fin.marginPct > 0 && fin.marginPct < (bu.targetMarginPct ?? TARGET_MARGIN_PCT)) atRiskCount += 1;
+    if (fin.marginPct > 0 && fin.marginPct < (bu?.targetMarginPct ?? TARGET_MARGIN_PCT)) atRiskCount += 1;
   }
 
   const configMap: Record<string, string> = {};
@@ -416,7 +416,7 @@ async function buildBuHealthSection(user: any, display: Currency) {
   );
   // Per-BU target (percent → fraction); the old global yearly_margin_target
   // config key is superseded by BusinessUnit.targetMarginPct.
-  const marginTarget = (bu.targetMarginPct ?? TARGET_MARGIN_PCT) / 100;
+  const marginTarget = (bu?.targetMarginPct ?? TARGET_MARGIN_PCT) / 100;
   const headcountTarget = Number(configMap[`headcount_target_${buCode}`] ?? "0");
 
   const result: Record<string, any> = {

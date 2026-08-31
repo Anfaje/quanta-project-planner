@@ -75,13 +75,15 @@ describe("BU target margin", () => {
     const account = await getDefaultAccount(prisma);
     const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
     const worker = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
-    // billRate 200 / costRate 100 → 50% margin.
+    // billRate 200 / costRate 100 → ~50% planned margin. Drafts carry the
+    // belowTarget flag on detail (it powers the approval hint).
     const project = await seedProject(prisma, {
       accountId: account.id,
       owningBuId: bu.id,
       createdBy: aa!.id,
+      status: "draft",
       assignments: [{ userId: worker.id, projectRole: "Dev", billRate: 200, costRate: 100 }],
-      seedHours: { plannedPerWeek: 10, actualPerWeek: 10 },
+      seedHours: { plannedPerWeek: 10, actualPerWeek: 0 },
     });
     const aaAgent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
 
