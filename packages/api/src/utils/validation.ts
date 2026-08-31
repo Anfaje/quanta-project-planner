@@ -187,6 +187,8 @@ export const updateAssignmentSchema = z.object({
 // Standing per-person cost rate (loaded salary + overhead). null clears it.
 export const updateCostRateSchema = z.object({
   costRate: z.number().min(0).max(100_000).nullable(),
+  // Currency of the standing rate; omitted = leave unchanged (defaults USD).
+  currency: z.enum(["USD", "GBP", "DKK", "EUR", "CHF", "CAD"]).optional(),
 });
 
 export const hoursBatchSchema = z.object({

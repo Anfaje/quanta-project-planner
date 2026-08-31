@@ -8,6 +8,7 @@ import { useMe } from "../context/AuthContext";
 import { CreatableSelect } from "../components/CreatableSelect";
 import { InviteModal } from "../components/InviteModal";
 import { canInviteUsers, userAdminBuIds } from "../lib/capabilities";
+import { convert, round2 } from "../lib/currency";
 import { Layout } from "../components/Layout";
 import {
   Card,
@@ -880,6 +881,17 @@ function TeamMemberModal({
                   const u = candidates.find((x) => x.id === v);
                   if (u && !projectRole && u.projectRoles.length > 0) {
                     setProjectRole(u.projectRoles[0]);
+                  }
+                  // Prefill the standing cost, converted into this project's
+                  // currency (editable before saving).
+                  if (u?.costRate != null && costRate.trim() === "") {
+                    setCostRate(
+                      String(
+                        round2(
+                          convert(u.costRate, u.costRateCurrency ?? "USD", project.currency)
+                        )
+                      )
+                    );
                   }
                 }}
                 options={candidates.map((u) => ({

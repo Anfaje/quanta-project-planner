@@ -38,6 +38,7 @@ const USERS: AdminUser[] = [
     primaryBu: { code: "BU-A", name: "BU A" },
     financialAccess: false,
     costRate: 120,
+  costRateCurrency: "USD",
     isActive: true,
     status: "active",
     createdAt: "2025-01-01",
@@ -53,6 +54,7 @@ const USERS: AdminUser[] = [
     primaryBu: { code: "BU-A", name: "BU A" },
     financialAccess: false,
     costRate: null,
+  costRateCurrency: "USD",
     isActive: true,
     status: "active",
     createdAt: "2025-01-01",
@@ -75,7 +77,7 @@ describe("AdminConsolePage — cost rate", () => {
   it("shows a user's cost rate", async () => {
     renderWithProviders(<AdminConsolePage />);
     expect(await screen.findByText("Maya Chen")).toBeInTheDocument();
-    expect(screen.getByText("$120")).toBeInTheDocument();
+    expect(screen.getByText("$120.00")).toBeInTheDocument();
   });
 
   it("edits a cost rate via the prompt and PUTs the new value", async () => {
@@ -84,7 +86,7 @@ describe("AdminConsolePage — cost rate", () => {
     await screen.findByText("Maya Chen");
 
     // Click the current rate to open the editor.
-    await userEvent.click(screen.getByText("$120"));
+    await userEvent.click(screen.getByText("$120.00"));
     const dialog = await screen.findByRole("dialog");
     const input = within(dialog).getByRole("spinbutton");
     await userEvent.clear(input);
@@ -92,7 +94,10 @@ describe("AdminConsolePage — cost rate", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: /save/i }));
 
     await waitFor(() => {
-      expect(api.put).toHaveBeenCalledWith("/api/admin/users/u1/cost-rate", { costRate: 150 });
+      expect(api.put).toHaveBeenCalledWith("/api/admin/users/u1/cost-rate", {
+        costRate: 150,
+        currency: "USD",
+      });
     });
   });
 });

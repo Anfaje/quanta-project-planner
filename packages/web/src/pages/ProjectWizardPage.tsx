@@ -15,6 +15,7 @@ import { CreatableSelect } from "../components/CreatableSelect";
 import { CreateAccountModal, CreateBuModal } from "../components/EntityCreateModals";
 import { InviteModal } from "../components/InviteModal";
 import { canCreateAccounts, canCreateBusinessUnits, canInviteUsers, userAdminBuIds } from "../lib/capabilities";
+import { convert, round2 } from "../lib/currency";
 import { Layout } from "../components/Layout";
 import {
   Alert,
@@ -792,7 +793,11 @@ function Step2Resources({
     if (selectedIds.has(u.id)) return;
     const buCode = u.primaryBu?.code ?? "";
     const owningBuCode = bus.find((b) => b.id === state.owningBuId)?.code ?? "";
-    const baseline = u.costRate ?? 0;
+    // Standing rate lives in the person's home currency — convert into the
+    // project's currency before applying cross-BU markup.
+    const baseline = round2(
+      convert(u.costRate ?? 0, u.costRateCurrency ?? "USD", state.currency)
+    );
     const newResource: ResourceDraft = {
       userId: u.id,
       name: u.name,

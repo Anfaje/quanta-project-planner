@@ -431,6 +431,8 @@ export interface AdminUser {
   primaryBu: { code: string; name: string } | null;
   financialAccess: boolean;
   costRate: number | null;
+  /** Currency of the standing cost rate (default USD). */
+  costRateCurrency: Currency;
   isActive: boolean;
   status: "active" | "pending" | "deactivated";
   createdAt: string;
