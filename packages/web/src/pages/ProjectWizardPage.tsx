@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useId, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
 import type { Currency,
@@ -11,6 +11,10 @@ import type { Currency,
   HoursGrid,
 } from "../lib/types";
 import { useMe } from "../context/AuthContext";
+import { CreatableSelect } from "../components/CreatableSelect";
+import { CreateAccountModal, CreateBuModal } from "../components/EntityCreateModals";
+import { InviteModal } from "../components/InviteModal";
+import { canCreateAccounts, canCreateBusinessUnits, canInviteUsers, userAdminBuIds } from "../lib/capabilities";
 import { Layout } from "../components/Layout";
 import {
   Alert,
@@ -541,6 +545,7 @@ function Step1Basics({
   businessUnits: AdminBusinessUnit[];
   lockCode?: boolean;
 }) {
+  const me = useMe();
   const activeAccounts = accounts.filter((a) => a.isActive);
   const activeBus = businessUnits.filter((b) => b.isActive);
 
@@ -589,15 +594,23 @@ function Step1Basics({
           />
 
           <Field label="Account *">
-            <SelectField
+            <CreatableSelect
               value={state.accountId}
               onChange={(v) => setState({ ...state, accountId: v })}
               options={activeAccounts.map((a) => ({ value: a.id, label: `${a.name} (${a.code})` }))}
               placeholder="Select an account"
+              canCreate={canCreateAccounts(me)}
+              createLabel="New account…"
+              renderCreateModal={(close) => (
+                <CreateAccountModal
+                  onClose={close}
+                  onCreated={(account) => setState({ ...state, accountId: account.id })}
+                />
+              )}
             />
           </Field>
           <Field label="Owning business unit *">
-            <SelectField
+            <CreatableSelect
               value={state.owningBuId}
               onChange={(v) => {
                 const newOwningBuCode = businessUnits.find((b) => b.id === v)?.code ?? "";
@@ -615,6 +628,14 @@ function Step1Basics({
               }}
               options={activeBus.map((b) => ({ value: b.id, label: `${b.code} · ${b.name}` }))}
               placeholder="Select a BU"
+              canCreate={canCreateBusinessUnits(me)}
+              createLabel="New business unit…"
+              renderCreateModal={(close) => (
+                <CreateBuModal
+                  onClose={close}
+                  onCreated={(bu) => setState({ ...state, owningBuId: bu.id })}
+                />
+              )}
             />
           </Field>
 
@@ -743,6 +764,10 @@ function Step2Resources({
 }) {
   const [search, setSearch] = useState("");
   const [buFilter, setBuFilter] = useState("");
+  const me = useMe();
+  const qc = useQueryClient();
+  const [invitingUser, setInvitingUser] = useState(false);
+  const inviteReach = userAdminBuIds(me);
 
   // BU code of the project's owning BU — used to flag/markup cross-BU resources.
   const owningBuCode = bus.find((b) => b.id === state.owningBuId)?.code ?? "";
@@ -804,6 +829,15 @@ function Step2Resources({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* ── User directory ── */}
+      {invitingUser && (
+        <InviteModal
+          businessUnits={bus}
+          allowedBuIds={inviteReach === "all" ? null : inviteReach}
+          allowAa={me.roles.includes("AA")}
+          onClose={() => setInvitingUser(false)}
+          onInvited={() => qc.invalidateQueries({ queryKey: ["admin", "users"] })}
+        />
+      )}
       <Card>
         <div className="px-6 py-4 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">Team directory</h2>
@@ -823,10 +857,24 @@ function Step2Resources({
             options={bus.map((b) => ({ value: b.id, label: b.code }))}
             placeholder="All BUs"
           />
+          {canInviteUsers(me) && (
+            <Button variant="secondary" size="sm" onClick={() => setInvitingUser(true)}>
+              Invite someone…
+            </Button>
+          )}
         </div>
         <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
           {visibleUsers.length === 0 ? (
-            <div className="py-10 text-center text-xs text-gray-400">No matches</div>
+            <div className="py-10 text-center text-xs text-gray-400">
+              No matches
+              {canInviteUsers(me) && (
+                <div className="mt-2">
+                  <Button variant="secondary" size="sm" onClick={() => setInvitingUser(true)}>
+                    Invite someone…
+                  </Button>
+                </div>
+              )}
+            </div>
           ) : (
             visibleUsers.map((u) => {
               const picked = selectedIds.has(u.id);

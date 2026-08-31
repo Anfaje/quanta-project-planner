@@ -2,8 +2,12 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../lib/api";
-import type { AssignmentRow, AdminUser, ProjectDetail, Me } from "../lib/types";
+import type {
+  AdminBusinessUnit, AssignmentRow, AdminUser, ProjectDetail, Me } from "../lib/types";
 import { useMe } from "../context/AuthContext";
+import { CreatableSelect } from "../components/CreatableSelect";
+import { InviteModal } from "../components/InviteModal";
+import { canInviteUsers, userAdminBuIds } from "../lib/capabilities";
 import { Layout } from "../components/Layout";
 import {
   Card,
@@ -808,6 +812,13 @@ function TeamMemberModal({
   );
   const [error, setError] = useState<string | null>(null);
 
+  const meForInvite = useMe();
+  const inviteReach = userAdminBuIds(meForInvite);
+  const invitesBusQ = useQuery({
+    queryKey: ["admin", "bus"],
+    queryFn: () => api.get<{ businessUnits: AdminBusinessUnit[] }>("/api/admin/bus"),
+    enabled: canInviteUsers(meForInvite),
+  });
   const usersQ = useQuery({
     queryKey: ["admin", "users"],
     queryFn: () => api.get<{ users: AdminUser[] }>("/api/admin/users"),
@@ -862,25 +873,35 @@ function TeamMemberModal({
           {!existing && (
             <div>
               <div className="text-sm font-medium text-gray-700 mb-1">Person</div>
-              <select
+              <CreatableSelect
                 value={userId}
-                onChange={(e) => {
-                  setUserId(e.target.value);
-                  const u = candidates.find((x) => x.id === e.target.value);
+                onChange={(v) => {
+                  setUserId(v);
+                  const u = candidates.find((x) => x.id === v);
                   if (u && !projectRole && u.projectRoles.length > 0) {
                     setProjectRole(u.projectRoles[0]);
                   }
                 }}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm bg-white"
-              >
-                <option value="">Select a person…</option>
-                {candidates.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.primaryBu?.code ?? "—"}
-                    {u.status === "pending" ? " · invited" : ""})
-                  </option>
-                ))}
-              </select>
+                options={candidates.map((u) => ({
+                  value: u.id,
+                  label: `${u.name} (${u.primaryBu?.code ?? "—"}${u.status === "pending" ? " · invited" : ""})`,
+                }))}
+                placeholder="Select a person…"
+                canCreate={canInviteUsers(meForInvite)}
+                createLabel="Invite new user…"
+                renderCreateModal={(close) => (
+                  <InviteModal
+                    businessUnits={invitesBusQ.data?.businessUnits ?? []}
+                    allowedBuIds={inviteReach === "all" ? null : inviteReach}
+                    allowAa={meForInvite.roles.includes("AA")}
+                    onClose={close}
+                    onInvited={(res) => {
+                      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+                      setUserId(res.userId);
+                    }}
+                  />
+                )}
+              />
               {selected?.status === "pending" && (
                 <p className="mt-1 text-xs text-amber-600">
                   Invited but not yet active — they can be planned now and will see the project

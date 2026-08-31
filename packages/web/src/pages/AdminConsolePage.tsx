@@ -6,7 +6,6 @@ import type {
   AdminBusinessUnit,
   AdminDomain,
   AdminUser,
-  InviteCreatedResponse,
   Role,
 } from "../lib/types";
 import { useMe } from "../context/AuthContext";
@@ -26,7 +25,10 @@ import {
   Tabs,
 } from "../components/ui";
 import { PermissionsDrawer } from "../components/PermissionsDrawer";
-import { formatDate, formatRelative, roleLabel } from "../lib/format";
+import { InviteModal } from "../components/InviteModal";
+import { CreateBuModal, CreateAccountModal } from "../components/EntityCreateModals";
+import { CreatableSelect } from "../components/CreatableSelect";
+import { formatRelative, roleLabel } from "../lib/format";
 
 /**
  * Admin console.
@@ -422,6 +424,7 @@ function UserEditModal({
   const [managedAccountIds, setManagedAccountIds] = useState<string[]>(
     user.managedAccounts.map((a) => a.id)
   );
+  const [creatingAccount, setCreatingAccount] = useState(false);
   const [projectRolesText, setProjectRolesText] = useState(user.projectRoles.join(", "));
   const [error, setError] = useState<string | null>(null);
 
@@ -527,20 +530,20 @@ function UserEditModal({
       {!restricted && (
       <div className="mb-5">
         <div className="text-sm font-medium text-gray-700 mb-2">Primary business unit</div>
-        <select
+        <CreatableSelect
           value={primaryBuId}
-          onChange={(e) => setPrimaryBuId(e.target.value)}
-          className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50"
-        >
-          <option value="">— no change —</option>
-          {businessUnits
+          onChange={setPrimaryBuId}
+          options={businessUnits
             .filter((b) => b.isActive)
-            .map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.code} · {b.name}
-              </option>
-            ))}
-        </select>
+            .map((b) => ({ value: b.id, label: `${b.code} · ${b.name}` }))}
+          placeholder="— no change —"
+          canCreate={!restricted}
+          createLabel="New business unit…"
+          renderCreateModal={(close) => (
+            <CreateBuModal onClose={close} onCreated={(bu) => setPrimaryBuId(bu.id)} />
+          )}
+          className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50 bg-white"
+        />
       </div>
       )}
 
@@ -574,6 +577,21 @@ function UserEditModal({
                 })}
             </div>
           )}
+          {canAssignAccounts && (
+            <div className="mt-2">
+              <Button variant="ghost" size="sm" onClick={() => setCreatingAccount(true)}>
+                + New account…
+              </Button>
+            </div>
+          )}
+          {creatingAccount && (
+            <CreateAccountModal
+              onClose={() => setCreatingAccount(false)}
+              onCreated={(account) => {
+                if (!managedAccountIds.includes(account.id)) toggleAccount(account.id);
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -598,169 +616,6 @@ function UserEditModal({
 
 // ── Invite modal ──
 
-function InviteModal({
-  businessUnits,
-  lockBuCode = null,
-  allowAa = true,
-  onClose,
-}: {
-  businessUnits: AdminBusinessUnit[];
-  /** BU-lead mode: invites are locked to this BU code. */
-  lockBuCode?: string | null;
-  /** Whether the AA role may be granted (AA callers only). */
-  allowAa?: boolean;
-  onClose: () => void;
-}) {
-  const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
-  const lockedBuId = lockBuCode
-    ? businessUnits.find((b) => b.code === lockBuCode)?.id ?? ""
-    : null;
-  const [buId, setBuId] = useState(
-    lockedBuId ?? (businessUnits.find((b) => b.isActive)?.id ?? "")
-  );
-
-  // Whitelist is only about self-signup; an invitation authorizes any address.
-  // We still flag foreign domains so a typo'd or external invite is deliberate.
-  const domainsQ = useQuery({
-    queryKey: ["admin", "domains"],
-    queryFn: () => api.get<{ domains: Array<{ domain: string }> }>("/api/admin/domains"),
-  });
-  const whitelisted = (domainsQ.data?.domains ?? []).map((d) => d.domain.toLowerCase());
-  const emailDomain = email.includes("@") ? (email.split("@")[1] ?? "").trim().toLowerCase() : "";
-  const foreignDomain =
-    emailDomain.length > 0 && whitelisted.length > 0 && !whitelisted.includes(emailDomain);
-  const [projectRole, setProjectRole] = useState("");
-  const [roles, setRoles] = useState<Role[]>(["IC"]);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<InviteCreatedResponse | null>(null);
-
-  const toggleRole = (r: Role) =>
-    setRoles((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      api.post<InviteCreatedResponse>("/api/admin/users/invite", {
-        email,
-        buId,
-        roles,
-        name: name || undefined,
-        projectRole: projectRole || undefined,
-      }),
-    onSuccess: (res) => setResult(res),
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Invite failed"),
-  });
-
-  return (
-    <Modal open onClose={onClose} title="Invite user" size="md">
-      {result ? (
-        <div>
-          <Alert tone="emerald" title="Invitation created">
-            Share this link with {result.email}. Expires {formatDate(result.expiresAt)}.
-          </Alert>
-          <div className="mt-4 bg-gray-50 rounded-lg p-3 font-mono text-xs break-all select-all border border-gray-100">
-            {window.location.origin}
-            {result.acceptUrl}
-          </div>
-          <div className="text-xs text-gray-400 mt-2">
-            SMTP delivery isn&apos;t wired yet — copy the link and send it manually.
-          </div>
-          <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-gray-100">
-            <Button onClick={onClose}>Done</Button>
-          </div>
-        </div>
-      ) : (
-        <>
-          {error && (
-            <div className="mb-4">
-              <Alert tone="rose">{error}</Alert>
-            </div>
-          )}
-          <FormInput label="Email *" type="email" value={email} onChange={setEmail} autoFocus />
-          {foreignDomain && (
-            <p className="mt-1.5 text-xs text-amber-600">
-              {emailDomain} isn&rsquo;t one of the self-signup domains — this invitation goes to
-              an external address. That&rsquo;s allowed: the invitation itself is the
-              authorization.
-            </p>
-          )}
-          <FormInput label="Name" value={name} onChange={setName} placeholder="Optional pre-fill" />
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Business unit *
-            </label>
-            <select
-          disabled={lockedBuId != null}
-              value={buId}
-              onChange={(e) => setBuId(e.target.value)}
-              className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-50"
-            >
-              {businessUnits
-                .filter((b) => b.isActive)
-                .map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.code} · {b.name}
-                  </option>
-                ))}
-            </select>
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Role *
-            </label>
-            <div className="grid grid-cols-5 gap-2">
-              {(["IC", "PM", "AC", "BUL", "AA"] as Role[])
-            .filter((r) => allowAa || r !== "AA")
-            .map((r) => {
-                const active = roles.includes(r);
-                return (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => toggleRole(r)}
-                    className={`py-2 text-xs font-semibold rounded-lg border transition-colors ${
-                      active
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white text-gray-500 border-gray-200 hover:border-indigo-300"
-                    }`}
-                    title={roleLabel(r)}
-                  >
-                    {r}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="text-xs text-gray-400 mt-1.5">
-              {roles.length
-                ? `Signs up as: ${roles.map((r) => roleLabel(r)).join(" · ")}`
-                : "Pick at least one role"}
-            </div>
-          </div>
-          <FormInput
-            label="Project role"
-            value={projectRole}
-            onChange={setProjectRole}
-            placeholder="e.g. iOS Dev (optional)"
-            hint="Shown to the invitee and added to their project roles."
-          />
-
-          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
-            <Button variant="secondary" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              loading={mutation.isPending}
-              onClick={() => mutation.mutate()}
-              disabled={!email || !buId || roles.length === 0}
-            >
-              Create invite
-            </Button>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════
 // Business units tab
@@ -858,56 +713,6 @@ function BusinessUnitsTab({ canWrite }: { canWrite: boolean }) {
   );
 }
 
-function CreateBuModal({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient();
-  const [code, setCode] = useState("");
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const mutation = useMutation({
-    mutationFn: () => api.post("/api/admin/bus", { code, name }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin", "bus"] });
-      onClose();
-    },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Create failed"),
-  });
-
-  return (
-    <Modal open onClose={onClose} title="New business unit" size="sm">
-      {error && (
-        <div className="mb-4">
-          <Alert tone="rose">{error}</Alert>
-        </div>
-      )}
-      <FormInput
-        label="Code *"
-        value={code}
-        onChange={(v) => setCode(v.toUpperCase())}
-        placeholder="e.g. US-ORD-OWLS"
-        autoFocus
-      />
-      <FormInput
-        label="Name *"
-        value={name}
-        onChange={setName}
-        placeholder="e.g. Chicago Owls"
-      />
-      <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          loading={mutation.isPending}
-          onClick={() => mutation.mutate()}
-          disabled={!code || !name}
-        >
-          Create
-        </Button>
-      </div>
-    </Modal>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════
 // Accounts tab
@@ -1004,50 +809,6 @@ function AccountsTab() {
   );
 }
 
-function CreateAccountModal({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient();
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const mutation = useMutation({
-    mutationFn: () => api.post("/api/admin/accounts", { name, code }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin", "accounts"] });
-      onClose();
-    },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Create failed"),
-  });
-
-  return (
-    <Modal open onClose={onClose} title="New account" size="sm">
-      {error && (
-        <div className="mb-4">
-          <Alert tone="rose">{error}</Alert>
-        </div>
-      )}
-      <FormInput label="Name *" value={name} onChange={setName} autoFocus />
-      <FormInput
-        label="Code *"
-        value={code}
-        onChange={(v) => setCode(v.toUpperCase())}
-        placeholder="e.g. MER"
-      />
-      <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          loading={mutation.isPending}
-          onClick={() => mutation.mutate()}
-          disabled={!name || !code}
-        >
-          Create
-        </Button>
-      </div>
-    </Modal>
-  );
-}
 
 // ═══════════════════════════════════════════════════════════════
 // Domains tab

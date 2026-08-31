@@ -267,6 +267,50 @@ describe("permission grants: the editing ceiling", () => {
       .expect(400);
   });
 
+  it("manage_users @ BU: grantee reads the directory and invites into that BU only", async () => {
+    const bu = await getDefaultBu(prisma);
+    const otherBu = await prisma.businessUnit.upsert({
+      where: { code: "ZZ-GRT3" },
+      update: {},
+      create: { code: "ZZ-GRT3", name: "Other BU (invites)" },
+    });
+    const editor = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    await grant(editor.id, "manage_users", "business_unit", bu.id);
+    const agent = await authenticateAs(app, editor.email);
+
+    // Directory readable (needed to administer users at all).
+    await agent.get("/api/admin/users").expect(200);
+
+    // Invite into the granted BU works…
+    const email = `grantinv-${Math.random().toString(36).slice(2, 8)}@${TEST_DOMAIN}`;
+    const invited = await agent
+      .post("/api/admin/users/invite")
+      .send({ email, buId: bu.id, roles: ["IC"] });
+    expect(invited.status).toBeLessThan(300);
+    const pending = await prisma.user.findUnique({ where: { email } });
+    expect(pending).not.toBeNull();
+    expect(pending!.isActive).toBe(false);
+
+    // …other BUs are refused, and so is granting AA.
+    await agent
+      .post("/api/admin/users/invite")
+      .send({ email: `x-${email}`, buId: otherBu.id, roles: ["IC"] })
+      .expect(403);
+    await agent
+      .post("/api/admin/users/invite")
+      .send({ email: `y-${email}`, buId: bu.id, roles: ["AA"] })
+      .expect(403);
+
+    // A plain IC without the grant gets neither the directory nor invites.
+    const plain = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    const plainAgent = await authenticateAs(app, plain.email);
+    await plainAgent.get("/api/admin/users").expect(403);
+    await plainAgent
+      .post("/api/admin/users/invite")
+      .send({ email: `z-${email}`, buId: bu.id, roles: ["IC"] })
+      .expect(403);
+  });
+
   it("AA replaces the full grid, including account and platform scopes", async () => {
     const bu = await getDefaultBu(prisma);
     const accountA = await getDefaultAccount(prisma);
