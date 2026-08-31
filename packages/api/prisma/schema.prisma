@@ -124,6 +124,9 @@ model BusinessUnit {
   code      String   @unique                // e.g. "US-ORD-OWLS"
   name      String                          // e.g. "Chicago Owls"
   isActive  Boolean  @default(true) @map("is_active")
+  // Margin target (percent, e.g. 35 = 35%) — drives BU-health comparisons and
+  // the below-target flag on this BU's projects. Editable by AA and the BU's lead.
+  targetMarginPct Float @default(35) @map("target_margin_pct")
   createdAt DateTime @default(now()) @map("created_at")
 
   // Relations

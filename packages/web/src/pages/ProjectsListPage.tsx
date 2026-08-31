@@ -169,7 +169,7 @@ export function ProjectsListPage() {
                     </td>
                     <td className="px-6 py-3 text-right">
                       {p.marginPct != null ? (
-                        <Badge tone={p.marginPct >= TARGET_MARGIN_PCT ? "emerald" : "amber"}>
+                        <Badge tone={p.marginPct >= (p.targetMarginPct ?? TARGET_MARGIN_PCT) ? "emerald" : "amber"}>
                           {formatPercent(p.marginPct)}
                         </Badge>
                       ) : (

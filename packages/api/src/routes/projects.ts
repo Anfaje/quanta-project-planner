@@ -88,7 +88,7 @@ router.get("/", async (req: Request, res: Response) => {
       accountId: true,
       owningBuId: true,
       account: { select: { id: true, name: true, code: true } },
-      owningBu: { select: { id: true, code: true, name: true } },
+      owningBu: { select: { id: true, code: true, name: true, targetMarginPct: true } },
       shares: { select: { sharedWithBuId: true } },
       pricingModel: true,
       fixedPrice: true,
@@ -151,6 +151,7 @@ router.get("/", async (req: Request, res: Response) => {
         currency: p.currency,
         account: p.account,
         owningBu: p.owningBu,
+        targetMarginPct: p.owningBu.targetMarginPct,
         resourceCount: p.assignments.length,
         totalPlannedHours: fin.totalPlannedHours,
         totalActualHours: fin.totalActualHours,
@@ -201,7 +202,7 @@ router.get("/drafts", async (req: Request, res: Response) => {
       rejectionNote: true,
       rejectionAt: true,
       account: { select: { id: true, name: true, code: true } },
-      owningBu: { select: { id: true, code: true, name: true } },
+      owningBu: { select: { id: true, code: true, name: true, targetMarginPct: true } },
       createdBy: { select: { id: true, name: true, email: true } },
       reviewers: {
         select: { user: { select: { id: true, name: true, email: true } } },
@@ -272,7 +273,7 @@ router.get("/:id", async (req: Request, res: Response) => {
     where: { id: ctx.id },
     include: {
       account: { select: { id: true, name: true, code: true } },
-      owningBu: { select: { id: true, code: true, name: true } },
+      owningBu: { select: { id: true, code: true, name: true, targetMarginPct: true } },
       createdBy: { select: { id: true, name: true, email: true } },
       shares: {
         include: { sharedWithBu: { select: { id: true, code: true, name: true } } },
@@ -339,6 +340,9 @@ router.get("/:id", async (req: Request, res: Response) => {
     project.contingencyPct,
     { pricingModel: project.pricingModel, fixedPrice: project.fixedPrice }
   );
+  const buMarginTarget =
+    (project as { owningBu?: { targetMarginPct?: number } }).owningBu?.targetMarginPct ??
+    TARGET_MARGIN_PCT;
 
   const financials = serializeForUser(
     {
@@ -420,7 +424,8 @@ router.get("/:id", async (req: Request, res: Response) => {
             contingencyPct: Number(project.contingencyPct),
             contingencyAmt: projectFin.contingencyAmt,
             marginPct: projectFin.marginPct,
-            belowTarget: projectFin.marginPct < TARGET_MARGIN_PCT,
+            targetMarginPct: buMarginTarget,
+            belowTarget: projectFin.marginPct < buMarginTarget,
           },
         }
       : {}),

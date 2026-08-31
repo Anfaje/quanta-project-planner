@@ -28,6 +28,7 @@ import { PermissionsDrawer } from "../components/PermissionsDrawer";
 import { InviteModal } from "../components/InviteModal";
 import { CreateBuModal, CreateAccountModal } from "../components/EntityCreateModals";
 import { CreatableSelect } from "../components/CreatableSelect";
+import { EditBuTargetModal } from "../components/EditBuTargetModal";
 import { formatRelative, roleLabel } from "../lib/format";
 
 /**
@@ -629,6 +630,7 @@ function BusinessUnitsTab({ canWrite }: { canWrite: boolean }) {
   });
 
   const [creating, setCreating] = useState(false);
+  const [editingTarget, setEditingTarget] = useState<AdminBusinessUnit | null>(null);
 
   const toggleMutation = useMutation({
     mutationFn: (args: { id: string; activate: boolean }) =>
@@ -658,6 +660,7 @@ function BusinessUnitsTab({ canWrite }: { canWrite: boolean }) {
                   <th className="text-left px-6 py-3 font-medium">Code</th>
                   <th className="text-left px-6 py-3 font-medium">Name</th>
                   <th className="text-left px-6 py-3 font-medium">BUL</th>
+                  <th className="text-right px-6 py-3 font-medium">Target margin</th>
                   <th className="text-right px-6 py-3 font-medium">Users</th>
                   <th className="text-right px-6 py-3 font-medium">Projects</th>
                   <th className="text-right px-6 py-3 font-medium">Status</th>
@@ -673,6 +676,19 @@ function BusinessUnitsTab({ canWrite }: { canWrite: boolean }) {
                     <td className="px-6 py-3 text-gray-800 font-medium">{b.name}</td>
                     <td className="px-6 py-3 text-gray-600">
                       {b.bul ? b.bul.name : <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
+                      {b.targetMarginPct}%
+                      {canWrite && (
+                        <button
+                          type="button"
+                          className="ml-2 text-xs text-indigo-500 hover:text-indigo-700"
+                          onClick={() => setEditingTarget(b)}
+                          aria-label={`Edit target margin for ${b.code}`}
+                        >
+                          Edit
+                        </button>
+                      )}
                     </td>
                     <td className="px-6 py-3 text-right text-gray-700 tabular-nums">
                       {b.userCount}
@@ -709,6 +725,14 @@ function BusinessUnitsTab({ canWrite }: { canWrite: boolean }) {
       )}
 
       {creating && <CreateBuModal onClose={() => setCreating(false)} />}
+      {editingTarget && (
+        <EditBuTargetModal
+          buId={editingTarget.id}
+          buCode={editingTarget.code}
+          current={editingTarget.targetMarginPct}
+          onClose={() => setEditingTarget(null)}
+        />
+      )}
     </div>
   );
 }

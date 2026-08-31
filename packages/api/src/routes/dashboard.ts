@@ -348,7 +348,7 @@ async function buildBuHealthSection(user: any, display: Currency) {
   // Fetch the BU first so we can key the config lookup by its code.
   const bu = await prisma.businessUnit.findUnique({
     where: { id: buId },
-    select: { id: true, code: true, name: true },
+    select: { id: true, code: true, name: true, targetMarginPct: true },
   });
   const buCode = bu?.code ?? "";
 
@@ -402,8 +402,8 @@ async function buildBuHealthSection(user: any, display: Currency) {
     ytdCost += fin.totalActualCost;
     totalFee += fin.totalFee;
     totalCost += fin.totalCost;
-    // "At risk" = projected margin < 35%
-    if (fin.marginPct > 0 && fin.marginPct < TARGET_MARGIN_PCT) atRiskCount += 1;
+    // "At risk" = projected margin below this BU's target
+    if (fin.marginPct > 0 && fin.marginPct < (bu?.targetMarginPct ?? TARGET_MARGIN_PCT)) atRiskCount += 1;
   }
 
   const configMap: Record<string, string> = {};
@@ -414,7 +414,9 @@ async function buildBuHealthSection(user: any, display: Currency) {
     "USD",
     display
   );
-  const marginTarget = Number(configMap["yearly_margin_target"] ?? "0.40");
+  // Per-BU target (percent → fraction); the old global yearly_margin_target
+  // config key is superseded by BusinessUnit.targetMarginPct.
+  const marginTarget = (bu?.targetMarginPct ?? TARGET_MARGIN_PCT) / 100;
   const headcountTarget = Number(configMap[`headcount_target_${buCode}`] ?? "0");
 
   const result: Record<string, any> = {

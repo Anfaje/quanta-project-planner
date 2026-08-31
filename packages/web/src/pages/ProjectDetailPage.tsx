@@ -374,7 +374,7 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
               </div>
               {fin.belowTarget && (
                 <p className="mt-2 text-xs text-amber-700">
-                  Below the {TARGET_MARGIN_PCT}% target margin — approval will ask you to
+                  Below the {fin.targetMarginPct ?? TARGET_MARGIN_PCT}% target margin — approval will ask you to
                   confirm.
                 </p>
               )}
@@ -397,7 +397,7 @@ function DraftWorkflowPanel({ data, me }: { data: ProjectDetail; me: Me }) {
           fin?.belowTarget ? (
             <>
               Planned margin is <strong>{formatPercent(fin.marginPct)}</strong> — below the{" "}
-              {TARGET_MARGIN_PCT}% target. Approving activates the project and commits its
+              {fin?.targetMarginPct ?? TARGET_MARGIN_PCT}% target. Approving activates the project and commits its
               planned hours at this margin.
             </>
           ) : (
