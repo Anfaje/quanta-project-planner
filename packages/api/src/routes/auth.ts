@@ -22,6 +22,13 @@ const router = Router();
  * Domain-whitelisted signup. New users start as IC.
  */
 router.post("/register", async (req: Request, res: Response) => {
+  // Self-signup is disabled for now: accounts are created by invitation only
+  // (see the accept-invite flow). Reopening this behind proper MFA is
+  // tracked in GitHub issue #40.
+  return res.status(403).json({
+    error: "Self-signup is disabled — accounts are created by invitation. Ask an administrator to invite you.",
+  });
+  /* eslint-disable no-unreachable */
   try {
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
