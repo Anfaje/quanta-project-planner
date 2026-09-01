@@ -4,7 +4,6 @@ import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { LoginPage, MfaVerifyPage } from "./pages/LoginPage";
 import { MfaSetupPage } from "./pages/MfaSetupPage";
-import { SignupPage } from "./pages/SignupPage";
 import { WelcomePage } from "./pages/WelcomePage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
@@ -72,7 +71,8 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/login/mfa" element={<MfaVerifyPage />} />
           <Route path="/login/mfa-setup" element={<MfaSetupPage />} />
-          <Route path="/signup" element={<SignupPage />} />
+          {/* Self-signup disabled (issue #40): the old /signup URL lands on login. */}
+          <Route path="/signup" element={<Navigate to="/login" replace />} />
           <Route path="/welcome" element={<WelcomePage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password/:token" element={<ResetPasswordPage />} />

@@ -4,7 +4,6 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma";
 import { logger } from "../lib/logger";
 import {
-  registerSchema,
   loginSchema,
   mfaVerifySchema,
   forgotPasswordSchema,
@@ -21,101 +20,15 @@ const router = Router();
  * POST /api/auth/register
  * Domain-whitelisted signup. New users start as IC.
  */
-router.post("/register", async (req: Request, res: Response) => {
-  try {
-    const parsed = registerSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
-    }
-
-    const { email, password, name, projectRoles } = parsed.data;
-
-    // Check domain whitelist
-    const domain = email.split("@")[1]?.toLowerCase();
-    if (!domain) {
-      return res.status(400).json({ error: "Invalid email format" });
-    }
-
-    const allowedDomains = await prisma.domainWhitelist.findMany({ select: { domain: true } });
-    const domainList = allowedDomains.map((d) => d.domain);
-
-    if (!domainList.includes(domain)) {
-      return res.status(403).json({
-        error: "Email domain not authorised",
-        allowedDomains: domainList,
-      });
-    }
-
-    // Check if email already exists
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return res.status(409).json({ error: "An account with this email already exists" });
-    }
-
-    // Get default BU (first active one — can be reassigned by AA later)
-    const defaultBU = await prisma.businessUnit.findFirst({ where: { isActive: true } });
-    if (!defaultBU) {
-      return res.status(500).json({ error: "No active business units configured" });
-    }
-
-    // Create user
-    const passwordHash = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: {
-        email,
-        name,
-        passwordHash,
-        roles: ["IC"],
-        projectRoles,
-        primaryBuId: defaultBU.id,
-      },
-    });
-
-    if (!mfaEnabled()) {
-      // MFA temporarily disabled: log the new user straight in, no TOTP setup.
-      req.session.userId = user.id;
-      logger.info({ userId: user.id, email }, "User registered (MFA disabled)");
-      return res.status(201).json({
-        status: "authenticated",
-        message: "Account created.",
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          roles: user.roles,
-          projectRoles: user.projectRoles,
-        },
-      });
-    }
-
-    // Generate TOTP secret (user will verify on first login)
-    const { secret, uri } = generateTOTPSecret(email);
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { totpSecret: encryptSecret(secret) },
-    });
-
-    logger.info({ userId: user.id, email }, "User registered");
-
-    res.status(201).json({
-      status: "mfa_setup_required",
-      message: "Account created. Please set up two-factor authentication.",
-      mfaSetup: {
-        qrUri: uri,
-        manualKey: secret,
-      },
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        roles: user.roles,
-        projectRoles: user.projectRoles,
-      },
-    });
-  } catch (err) {
-    logger.error({ err }, "Registration failed");
-    res.status(500).json({ error: "Registration failed" });
-  }
+router.post("/register", async (_req: Request, res: Response) => {
+  // Self-signup is disabled: accounts are created by invitation only (the
+  // accept-invite flow sets the password). Reopening this behind proper MFA
+  // is tracked in GitHub issue #40 — the old handler body lives in git
+  // history (removed in the same commit that added this stub).
+  return res.status(403).json({
+    error:
+      "Self-signup is disabled — accounts are created by invitation. Ask an administrator to invite you.",
+  });
 });
 
 /**

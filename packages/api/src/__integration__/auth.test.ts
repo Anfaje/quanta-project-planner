@@ -47,81 +47,19 @@ beforeEach(async () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("POST /api/auth/register", () => {
-  it("accepts a whitelisted domain and starts MFA setup", async () => {
+  it("is disabled: self-signup returns 403 pointing at invitations (issue #40)", async () => {
     const res = await request(app).post("/api/auth/register").send({
-      email: `newuser@${TEST_DOMAIN}`,
-      name: "New User",
-      password: TEST_PASSWORD,
-      projectRoles: [],
+      email: `nobody@${TEST_DOMAIN}`,
+      name: "Walk-up User",
+      password: "long-enough-password",
     });
-
-    expect(res.status).toBe(201);
-    expect(res.body.mfaSetup).toBeDefined();
-    expect(res.body.mfaSetup.qrUri).toMatch(/^otpauth:\/\//);
-    expect(res.body.mfaSetup.manualKey).toMatch(/^[A-Z2-7]+$/); // base32
-
-    // Verify the row landed in the database.
-    const inDb = await prisma.user.findUnique({ where: { email: `newuser@${TEST_DOMAIN}` } });
-    expect(inDb).not.toBeNull();
-    expect(inDb!.roles).toEqual(["IC"]);
-  });
-
-  it("rejects an email whose domain isn't whitelisted", async () => {
-    const res = await request(app).post("/api/auth/register").send({
-      email: "evil@untrusted-domain.io",
-      name: "Bad Actor",
-      password: TEST_PASSWORD,
-      projectRoles: [],
-    });
-
     expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/domain/i);
-    // And nothing was persisted.
-    const inDb = await prisma.user.findUnique({ where: { email: "evil@untrusted-domain.io" } });
-    expect(inDb).toBeNull();
-  });
-
-  it("rejects a duplicate email with 409", async () => {
-    const bu = await getDefaultBu(prisma);
-    await seedUser(prisma, { email: `dup@${TEST_DOMAIN}`, buId: bu.id });
-
-    const res = await request(app).post("/api/auth/register").send({
-      email: `dup@${TEST_DOMAIN}`,
-      name: "Duplicate",
-      password: TEST_PASSWORD,
-      projectRoles: [],
-    });
-
-    expect(res.status).toBe(409);
-  });
-
-  it("rejects passwords shorter than 8 characters", async () => {
-    const res = await request(app).post("/api/auth/register").send({
-      email: `weak@${TEST_DOMAIN}`,
-      name: "Weak",
-      password: "short", // 5 chars
-      projectRoles: [],
-    });
-
-    expect(res.status).toBe(400);
-    expect(res.body.details).toBeDefined();
-  });
-
-  it("accepts an exactly-8-character password (boundary)", async () => {
-    const res = await request(app).post("/api/auth/register").send({
-      email: `boundary@${TEST_DOMAIN}`,
-      name: "Boundary",
-      password: "12345678", // exactly 8 — the documented minimum (TC 1.16)
-      projectRoles: [],
-    });
-
-    expect(res.status).toBe(201);
+    expect(res.body.error).toMatch(/invitation/i);
+    // No account is created.
+    const user = await prisma.user.findUnique({ where: { email: `nobody@${TEST_DOMAIN}` } });
+    expect(user).toBeNull();
   });
 });
-
-// ═══════════════════════════════════════════════════════════════
-// Login + MFA
-// ═══════════════════════════════════════════════════════════════
 
 describe("POST /api/auth/login + MFA", () => {
   it("returns mfa_required for an existing user with a valid password", async () => {
