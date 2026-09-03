@@ -181,12 +181,12 @@ describe("multi-currency display conversion", () => {
 
     const agent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
 
-    // USD display (default): DKK converts at 0.145 USD/DKK.
+    // USD display (default): DKK converts at 0.157 USD/DKK.
     const usd = await agent.get("/api/accounts/summary?scope=lifetime").expect(200);
     expect(usd.body.displayCurrency).toBe("USD");
     const rowUsd = row(usd.body, account.id);
-    expect(rowUsd.revenue).toBe(1450);
-    expect(rowUsd.cost).toBe(725);
+    expect(rowUsd.revenue).toBe(1570);
+    expect(rowUsd.cost).toBe(785);
 
     // DKK display: the same project shows its native amounts.
     const dkk = await agent.get("/api/accounts/summary?scope=lifetime&currency=DKK").expect(200);

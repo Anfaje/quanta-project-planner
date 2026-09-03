@@ -1,16 +1,16 @@
 import type { Currency } from "./types";
 
 /**
- * Static FX table mirrored from the API's services/currency.ts — the single
- * source of truth for cross-currency conversion until live rates land (#12).
- * Keep the two tables in sync when editing.
+ * Static FX table mirrored from the API's services/currency.ts (indicative
+ * rates, refreshed 2026-09; CHF pinned to the user-verified 1.2356). Keep the
+ * two tables in sync — live rates are tracked in issue #12.
  */
 export const USD_PER_UNIT: Record<Currency, number> = {
   USD: 1,
-  GBP: 1.27,
-  EUR: 1.08,
-  DKK: 0.145,
-  CHF: 1.12,
+  GBP: 1.35,
+  EUR: 1.17,
+  DKK: 0.157,
+  CHF: 1.2356,
   CAD: 0.73,
 };
 

@@ -7,12 +7,16 @@ import { Currency } from "@prisma/client";
  * maintained in one place. When rates need to be admin-editable or live,
  * this module is the single seam to replace.
  */
+// Indicative FX rates (USD per 1 unit), refreshed 2026-09. CHF pinned to the
+// user-verified 1.2356. These are static placeholders until live rates land
+// (issue #12); the web mirror in packages/web/src/lib/currency.ts must be
+// kept in sync with this table.
 export const USD_PER_UNIT: Record<Currency, number> = {
   USD: 1,
-  GBP: 1.27,
-  EUR: 1.08,
-  DKK: 0.145,
-  CHF: 1.12,
+  GBP: 1.35,
+  EUR: 1.17,
+  DKK: 0.157,
+  CHF: 1.2356,
   CAD: 0.73,
 };
 
