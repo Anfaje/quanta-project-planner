@@ -435,6 +435,7 @@ router.get("/:id", async (req: Request, res: Response) => {
       canLockWeeks: canLockWeeks(user, capCtx),
       isDraft: project.status === "draft",
       canApproveDraft: isApprover,
+      canDelete: canActivateProject(user, project.owningBuId),
       canViewBilling: canViewBillRates(user, capCtx),
       canManageReviewers:
         project.status === "draft" &&
@@ -1048,6 +1049,47 @@ router.post("/:id/reviewers", async (req: Request, res: Response) => {
  * DELETE /api/projects/:id/reviewers/:userId
  * Remove a reviewer. Owner-only (or AA).
  */
+/**
+ * DELETE /api/projects/:id?confirm=<projectCode>
+ * Permanently delete a project — any status, including in-flight. Cascades
+ * take assignments, planned/actual hours, baselines, shares, and reviewers
+ * with it, so all recorded revenue and cost vanish from every overview.
+ * Deliberately heavyweight: AA or the owning BU's lead only (manage_projects
+ * grants do NOT unlock deletion), and the caller must echo the project code.
+ */
+router.delete("/:id", async (req: Request, res: Response) => {
+  const user = req.authUser!;
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, projectCode: true, name: true, status: true, owningBuId: true },
+  });
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!canActivateProject(user, project.owningBuId)) {
+    return res.status(403).json({
+      error: "Deleting a project requires AA or the owning business unit's lead",
+    });
+  }
+  if (req.query.confirm !== project.projectCode) {
+    return res.status(400).json({
+      error: `Confirmation mismatch — pass the project code (${"confirm=" + project.projectCode}) to delete`,
+    });
+  }
+  // Audit first (rows survive the delete as history), then cascade.
+  await logChanges("Project", project.id, user.id, [
+    {
+      field: "project.deleted",
+      oldValue: JSON.stringify({ code: project.projectCode, name: project.name, status: project.status }),
+      newValue: null,
+    },
+  ]);
+  await prisma.project.delete({ where: { id: project.id } });
+  logger.info(
+    { projectId: project.id, code: project.projectCode, status: project.status, actor: user.id },
+    "Project permanently deleted"
+  );
+  res.json({ deleted: true });
+});
+
 router.delete("/:id/reviewers/:userId", async (req: Request, res: Response) => {
   const user = req.authUser!;
   const project = await prisma.project.findUnique({

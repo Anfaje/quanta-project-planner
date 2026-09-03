@@ -65,6 +65,7 @@ export function ProjectDetailPage() {
   const [tab, setTab] = useState<Tab>("overview");
   const [shareOpen, setShareOpen] = useState(false);
   const [editProjectOpen, setEditProjectOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const me = useMe();
   // Sharing is sourced from the BUL/AA-gated BU list, so only those roles
   // get the management control (matches TC 4.10/5.22's BUL framing).
@@ -132,6 +133,11 @@ export function ProjectDetailPage() {
                 Edit project
               </Button>
             )}
+            {data.capabilities.canDelete && (
+              <Button variant="danger" size="sm" onClick={() => setDeleteOpen(true)}>
+                Delete project
+              </Button>
+            )}
             {canShare && p.status !== "archived" && p.status !== "draft" && (
               <Button variant="secondary" size="sm" onClick={() => setShareOpen(true)}>
                 Manage sharing
@@ -149,6 +155,16 @@ export function ProjectDetailPage() {
 
       {editProjectOpen && (
         <EditProjectModal project={p} onClose={() => setEditProjectOpen(false)} />
+      )}
+
+      {deleteOpen && (
+        <DeleteProjectModal
+          projectId={p.id}
+          projectCode={p.projectCode}
+          projectName={p.name}
+          status={p.status}
+          onClose={() => setDeleteOpen(false)}
+        />
       )}
 
       {/* ── Meta strip ── */}
@@ -954,6 +970,92 @@ function TeamMemberModal({
             disabled={(!existing && !userId) || !projectRole}
           >
             {existing ? "Save changes" : "Add to team"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteProjectModal({
+  projectId,
+  projectCode,
+  projectName,
+  status,
+  onClose,
+}: {
+  projectId: string;
+  projectCode: string;
+  projectName: string;
+  status: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [typed, setTyped] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const armed = typed.trim() === projectCode;
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.delete(`/api/projects/${projectId}?confirm=${encodeURIComponent(typed.trim())}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["accounts-summary"] });
+      navigate("/projects", { replace: true });
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Delete failed"),
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-gray-900/50" onClick={onClose} />
+      <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl p-6">
+        <h2 className="text-lg font-semibold text-rose-700">Permanently delete {projectCode}?</h2>
+        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <p className="font-medium">This cannot be undone.</p>
+          <p className="mt-2">
+            Deleting &ldquo;{projectName}&rdquo;{status !== "draft" ? " — an in-flight project — " : " "}
+            permanently removes its team assignments, every planned and actual hour, and all
+            baselines.{" "}
+            <span className="font-semibold">
+              All revenue and cost recorded on it will disappear from every project list,
+              dashboard, and account summary
+            </span>
+            , changing historical totals. If you only want it out of the way, consider archiving
+            instead.
+          </p>
+        </div>
+        {error && (
+          <div className="mt-3">
+            <Alert tone="rose">{error}</Alert>
+          </div>
+        )}
+        <div className="mt-4">
+          <div className="text-sm font-medium text-gray-700 mb-1">
+            Type <span className="font-mono">{projectCode}</span> to confirm you are absolutely sure
+          </div>
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={projectCode}
+            aria-label="Confirm project code"
+            className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg font-mono focus:outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-50"
+            autoFocus
+          />
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            disabled={!armed}
+            loading={mutation.isPending}
+            onClick={() => mutation.mutate()}
+          >
+            Delete permanently
           </Button>
         </div>
       </div>
