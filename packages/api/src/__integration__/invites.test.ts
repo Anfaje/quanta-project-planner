@@ -1,13 +1,7 @@
-import { beforeAll, afterAll, beforeEach, describe, it, expect   seedProject,
-  getDefaultAccount,
-} from "vitest";
+import { beforeAll, afterAll, beforeEach, describe, it, expect } from "vitest";
 import request from "supertest";
-import type { Express   seedProject,
-  getDefaultAccount,
-} from "express";
-import type { PrismaClient, Role   seedProject,
-  getDefaultAccount,
-} from "@prisma/client";
+import type { Express } from "express";
+import type { PrismaClient, Role } from "@prisma/client";
 import {
   setupTestApp,
   teardownTestApp,
