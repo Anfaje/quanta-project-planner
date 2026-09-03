@@ -211,6 +211,7 @@ export interface ProjectDetail {
     canLockWeeks: boolean;
     isDraft: boolean;
     canApproveDraft: boolean;
+    canDelete: boolean;
     canViewBilling: boolean;
     canManageReviewers: boolean;
   };

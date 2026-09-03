@@ -83,7 +83,8 @@ function detail(opts: {
       canManagePlan: true,
       canLockWeeks: false,
       isDraft: true,
-      canApproveDraft: false,
+      canDelete: false,
+    canApproveDraft: false,
       canViewBilling: false,
       canManageReviewers: false,
       ...(opts.capabilities ?? {}),
@@ -106,7 +107,8 @@ beforeEach(() => {
 describe("ProjectDetailPage — draft workflow", () => {
   it("an approver sees Approve/Reject and approving calls the API", async () => {
     h.me = makeMe({ id: "u-bul", roles: ["BUL"] }); // not the owner
-    mockGet(detail({ capabilities: { canApproveDraft: true } }));
+    mockGet(detail({ capabilities: { canDelete: false,
+    canApproveDraft: true } }));
     (api.post as any).mockResolvedValue({});
 
     renderWithProviders(<ProjectDetailPage />, {
@@ -130,7 +132,8 @@ describe("ProjectDetailPage — draft workflow", () => {
 
   it("shows the plan's economics to an approver and guards a below-target approval", async () => {
     h.me = makeMe({ id: "u-bul", roles: ["BUL"] });
-    const d = detail({ capabilities: { canApproveDraft: true } });
+    const d = detail({ capabilities: { canDelete: false,
+    canApproveDraft: true } });
     d.approvalFinancials = {
       plannedFee: 90000,
       plannedCost: 65000,
