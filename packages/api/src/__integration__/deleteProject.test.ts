@@ -59,7 +59,7 @@ describe("DELETE /api/projects/:id", () => {
     // Listed before; hours exist.
     const before = await aaAgent.get("/api/projects").expect(200);
     expect(before.body.projects.some((p: { id: string }) => p.id === project.id)).toBe(true);
-    const hoursBefore = await prisma.weekEntry.count({
+    const hoursBefore = await prisma.hourEntry.count({
       where: { assignment: { projectId: project.id } },
     });
     expect(hoursBefore).toBeGreaterThan(0);
@@ -75,7 +75,7 @@ describe("DELETE /api/projects/:id", () => {
 
     expect(await prisma.project.findUnique({ where: { id: project.id } })).toBeNull();
     expect(
-      await prisma.weekEntry.count({ where: { assignment: { projectId: project.id } } })
+      await prisma.hourEntry.count({ where: { assignment: { projectId: project.id } } })
     ).toBe(0);
     const after = await aaAgent.get("/api/projects").expect(200);
     expect(after.body.projects.some((p: { id: string }) => p.id === project.id)).toBe(false);
