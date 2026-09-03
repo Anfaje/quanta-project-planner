@@ -1082,7 +1082,7 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
       accountId: true,
       account: { select: { isActive: true } },
       owningBu: { select: { isActive: true } },
-      assignments: { select: { user: { select: { isActive: true } } } },
+      assignments: { select: { user: { select: { isActive: true, passwordHash: true } } } },
     },
   });
   if (!project) return res.status(404).json({ error: "Project not found" });
@@ -1100,10 +1100,13 @@ router.post("/:id/approve", async (req: Request, res: Response) => {
   if (!project.owningBu?.isActive) {
     return res.status(409).json({ error: "Owning business unit is inactive; cannot approve" });
   }
-  if (project.assignments.some((a) => !a.user?.isActive)) {
-    return res
-      .status(409)
-      .json({ error: "One or more assigned users are inactive; update the draft before approving" });
+  // Pending invitees (inactive, no password yet) are deliberately staffable
+  // and don't block approval — they'll accept and start logging. Deactivated
+  // users (inactive with credentials) are a real staffing problem.
+  if (project.assignments.some((a) => a.user && !a.user.isActive && a.user.passwordHash != null)) {
+    return res.status(409).json({
+      error: "One or more assigned users are deactivated; update the draft before approving",
+    });
   }
   // Project code uniqueness is already enforced by the @unique constraint — the
   // code was reserved at draft-creation time, so no clash is possible here.

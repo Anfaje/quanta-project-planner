@@ -1,7 +1,13 @@
-import { beforeAll, afterAll, beforeEach, describe, it, expect } from "vitest";
+import { beforeAll, afterAll, beforeEach, describe, it, expect   seedProject,
+  getDefaultAccount,
+} from "vitest";
 import request from "supertest";
-import type { Express } from "express";
-import type { PrismaClient, Role } from "@prisma/client";
+import type { Express   seedProject,
+  getDefaultAccount,
+} from "express";
+import type { PrismaClient, Role   seedProject,
+  getDefaultAccount,
+} from "@prisma/client";
 import {
   setupTestApp,
   teardownTestApp,
@@ -11,6 +17,8 @@ import {
   getDefaultBu,
   TEST_DOMAIN,
   TEST_PASSWORD,
+  seedProject,
+  getDefaultAccount,
 } from "./helpers";
 
 /**
@@ -245,5 +253,50 @@ describe("invitations bypass the domain whitelist", () => {
       .expect(201);
     const active = await prisma.user.findUnique({ where: { email } });
     expect(active?.isActive).toBe(true);
+  });
+
+  it("a draft staffed with a pending invitee approves; a deactivated assignee still blocks", async () => {
+    const bu = await getDefaultBu(prisma);
+    const account = await getDefaultAccount(prisma);
+    const aa = await prisma.user.findUnique({ where: { email: `aa@${TEST_DOMAIN}` } });
+    const aaAgent = await authenticateAs(app, `aa@${TEST_DOMAIN}`);
+
+    // Pending invitee: created inactive with no credentials (invite lifecycle).
+    const pending = await prisma.user.create({
+      data: {
+        email: `pending-appr-${Math.random().toString(36).slice(2, 8)}@${TEST_DOMAIN}`,
+        name: "Pending Invitee",
+        primaryBuId: bu.id,
+        roles: ["IC"],
+        passwordHash: null,
+        isActive: false,
+      },
+    });
+    const withPending = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: aa!.id,
+      status: "draft",
+      assignments: [{ userId: pending.id, projectRole: "Dev", billRate: 150, costRate: 80 }],
+      seedHours: { plannedPerWeek: 10, actualPerWeek: 0 },
+    });
+    const ok = await aaAgent.post(`/api/projects/${withPending.id}/approve`);
+    expect(ok.status).toBeLessThan(300);
+    const activated = await prisma.project.findUnique({ where: { id: withPending.id } });
+    expect(activated!.status).toBe("active");
+
+    // Deactivated user (credentials exist, isActive false): still a 409.
+    const deact = await seedUser(prisma, { buId: bu.id, roles: ["IC"] });
+    await prisma.user.update({ where: { id: deact.id }, data: { isActive: false } });
+    const withDeact = await seedProject(prisma, {
+      accountId: account.id,
+      owningBuId: bu.id,
+      createdBy: aa!.id,
+      status: "draft",
+      assignments: [{ userId: deact.id, projectRole: "Dev", billRate: 150, costRate: 80 }],
+      seedHours: { plannedPerWeek: 10, actualPerWeek: 0 },
+    });
+    const blocked = await aaAgent.post(`/api/projects/${withDeact.id}/approve`).expect(409);
+    expect(blocked.body.error).toMatch(/deactivated/i);
   });
 });
